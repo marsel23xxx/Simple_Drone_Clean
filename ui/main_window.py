@@ -1,6 +1,6 @@
 """
-Main Window yang terintegrasi dengan desain UI yang sudah ada
-Menggunakan activity_ui.py sebagai base dan menambahkan fungsionalitas lengkap
+Main Window Implementation
+Drone Control Center Main Window dengan integrasi video streaming
 """
 
 import sys
@@ -19,12 +19,13 @@ from activity_ui import Ui_MainWindow
 from config.settings import (
     APP_CONFIG, UI_CONFIG, ASSET_PATHS, NETWORK_CONFIG, FILE_PATHS
 )
-from ui.widgets.point_cloud_widget import SmoothPointCloudWidget
-from ui.widgets.joystick_dialog import JoystickDialog
+from .widgets.point_cloud_widget import SmoothPointCloudWidget
+from .widgets.video_stream_widget import VideoStreamWidget, RTSPStreamWidget, TCPVideoStreamWidget
+from .widgets.joystick_dialog import JoystickDialog
 from core.tcp_receiver import TCPDataReceiver, TCPServerThread
 from core.websocket_client import WebSocketCommandClient, WebSocketCommandThread
 from core.drone_parser import DroneParser
-
+from .widgets.drone_status_widget import DroneStatusWidget
 
 class DroneControlMainWindow(QMainWindow):
     """Main Window yang mengintegrasikan UI design dengan fungsionalitas lengkap."""
@@ -41,6 +42,9 @@ class DroneControlMainWindow(QMainWindow):
         self.last_frame_time = time.time()
         self.fps = 0.0
         self.start_enabled = False
+        
+        # View mode tracking
+        self.current_view_mode = "pointcloud"  # "pointcloud" or "video"
         
         # Initialize communication components
         self.setup_communication()
@@ -59,6 +63,8 @@ class DroneControlMainWindow(QMainWindow):
         
         # Update asset paths untuk menggunakan path yang benar
         self.update_asset_paths()
+
+        self.update_waypoints_table()
     
     def setup_communication(self):
         """Initialize communication components."""
@@ -88,18 +94,47 @@ class DroneControlMainWindow(QMainWindow):
         self.main_point_cloud.setStyleSheet(self.ui.SwitchView_1.styleSheet())
         self.ui.SwitchView_1.hide()  # Hide original label
         
-        # Replace SwitchView_2 dengan secondary point cloud widget  
-        self.secondary_point_cloud = SmoothPointCloudWidget()
-        self.secondary_point_cloud.setParent(self.ui.frame_8)
-        self.secondary_point_cloud.setGeometry(self.ui.SwitchView_2.geometry())
-        self.secondary_point_cloud.setStyleSheet(self.ui.SwitchView_2.styleSheet())
+        # Replace SwitchView_2 dengan video streaming widget  
+        self.video_stream = VideoStreamWidget()
+        self.video_stream.setParent(self.ui.frame_8)
+        self.video_stream.setGeometry(self.ui.SwitchView_2.geometry())
+        self.video_stream.setStyleSheet(self.ui.SwitchView_2.styleSheet())
         self.ui.SwitchView_2.hide()  # Hide original label
+        
+        # Initially show point cloud and hide video
+        self.main_point_cloud.show()
+        self.video_stream.hide()
         
         # Setup current marker untuk single command mode
         self.current_marker = None
         
         # Setup edit mode tracking
         self.edit_mode = False
+
+        # Setup drone status widget
+        self.drone_status = DroneStatusWidget()
+        
+        # Pass UI widget references
+        ui_refs = {
+            'DroneTopView': self.ui.DroneTopView,
+            'DroneSideView': self.ui.DroneSideView, 
+            'DroneBottomView': self.ui.DroneBottomView,
+            'DroneBattery': self.ui.DroneBattery,
+            'DronePositionX': self.ui.DronePositionX,
+            'DronePositionY': self.ui.DronePositionY,
+            'DroneHeight': self.ui.DroneHeight,
+            'DroneSpeedX': self.ui.DroneSpeedX,
+            'DroneSpeedY': self.ui.DroneSpeedY,
+            'DroneSpeedZ': self.ui.DroneSpeedZ,
+            'DroneMode': self.ui.DroneMode,
+            'DroneFlightTime': self.ui.DroneFlightTime
+        }
+        self.drone_status.set_ui_widgets(ui_refs)
+        
+        # Connect alerts
+        self.drone_status.battery_low.connect(self.on_battery_low)
+        self.drone_status.connection_lost.connect(self.on_connection_lost)
+        self.drone_status.emergency_mode.connect(self.on_emergency_mode)
     
     def update_asset_paths(self):
         """Update asset paths untuk styling yang menggunakan relative paths."""
@@ -148,6 +183,9 @@ class DroneControlMainWindow(QMainWindow):
         self.main_point_cloud.waypoint_changed.connect(self.update_waypoints_table)
         self.main_point_cloud.marker_changed.connect(self.update_marker_display)
         
+        # Video stream signals
+        self.video_stream.frame_received.connect(self.update_video_status)
+        
         # Connect UI elements ke functions
         self.ui.CommandConnect.clicked.connect(self.toggle_connection)
         self.ui.btAutonomousEmergency.clicked.connect(self.emergency_stop)
@@ -191,11 +229,47 @@ class DroneControlMainWindow(QMainWindow):
         """Start communication services."""
         self.start_tcp_server()
         
+        # Initialize video streaming (example with RTSP)
+        # Uncomment dan sesuaikan dengan sumber video Anda
+        # self.start_video_stream()
+        
     def start_tcp_server(self):
         """Start TCP server thread."""
         if self.tcp_thread is None or not self.tcp_thread.isRunning():
             self.tcp_thread = TCPServerThread(self.tcp_receiver)
             self.tcp_thread.start()
+    
+    def start_video_stream(self, stream_url=None):
+        """Start video streaming.
+        
+        Args:
+            stream_url: RTSP URL atau TCP endpoint untuk video stream
+        """
+        # Example: Start RTSP stream
+        if stream_url and stream_url.startswith('rtsp://'):
+            # Replace current video widget dengan RTSP widget
+            old_geometry = self.video_stream.geometry()
+            old_parent = self.video_stream.parent()
+            old_style = self.video_stream.styleSheet()
+            
+            self.video_stream.hide()
+            self.video_stream = RTSPStreamWidget(stream_url)
+            self.video_stream.setParent(old_parent)
+            self.video_stream.setGeometry(old_geometry)
+            self.video_stream.setStyleSheet(old_style)
+            self.video_stream.frame_received.connect(self.update_video_status)
+            
+            # Start the stream
+            success = self.video_stream.start_stream()
+            if success:
+                self.log_debug(f"Video stream started: {stream_url}")
+            else:
+                self.log_debug(f"Failed to start video stream: {stream_url}")
+        else:
+            # Setup TCP video streaming
+            if hasattr(self.tcp_receiver, 'video_frame_received'):
+                self.video_stream.set_tcp_receiver(self.tcp_receiver)
+                self.log_debug("TCP video stream configured")
     
     def toggle_connection(self):
         """Toggle WebSocket connection."""
@@ -237,23 +311,63 @@ class DroneControlMainWindow(QMainWindow):
         print("EMERGENCY STOP ACTIVATED")
     
     def switch_views(self):
-        """Switch between main dan secondary point cloud views."""
-        # Swap content antara main dan secondary views
-        # Get current point cloud data
-        main_points = self.main_point_cloud.raw_points.copy()
-        secondary_points = self.secondary_point_cloud.raw_points.copy()
+        """Switch/swap positions between point cloud and video stream widgets."""
+        # Get current geometries dan parents
+        pc_geometry = self.main_point_cloud.geometry()
+        pc_parent = self.main_point_cloud.parent()
+        pc_style = self.main_point_cloud.styleSheet()
         
-        # Swap the data
-        self.main_point_cloud.update_current_frame(secondary_points)
-        self.secondary_point_cloud.update_current_frame(main_points)
+        video_geometry = self.video_stream.geometry()
+        video_parent = self.video_stream.parent()
+        video_style = self.video_stream.styleSheet()
         
-        self.log_debug("Views switched")
+        # Swap positions
+        self.main_point_cloud.setParent(video_parent)
+        self.main_point_cloud.setGeometry(video_geometry)
+        self.main_point_cloud.setStyleSheet(video_style)
+        
+        self.video_stream.setParent(pc_parent)
+        self.video_stream.setGeometry(pc_geometry)
+        self.video_stream.setStyleSheet(pc_style)
+        
+        # Show both widgets setelah swap
+        self.main_point_cloud.show()
+        self.video_stream.show()
+        
+        # Toggle main view mode untuk waypoint controls
+        if self.current_view_mode == "pointcloud":
+            # Point cloud sekarang di area kecil, video di area besar
+            self.current_view_mode = "video"
+            self.ui.DroneSwitch.setText("Point Cloud Main")
+            
+            # Disable waypoint controls karena point cloud tidak di main area
+            self.ui.mcEditMode.setEnabled(False)
+            self.ui.scEdit.setEnabled(False)
+            self.ui.scSendGoto.setEnabled(False)
+            self.ui.scClearMarker.setEnabled(False)
+            
+            self.log_debug("Switched: Video main, Point cloud secondary")
+            
+        else:
+            # Point cloud kembali ke area besar, video di area kecil
+            self.current_view_mode = "pointcloud"
+            self.ui.DroneSwitch.setText("Video Main")
+            
+            # Re-enable waypoint controls karena point cloud di main area
+            self.ui.mcEditMode.setEnabled(True)
+            self.update_marker_display()  # Refresh control states
+            
+            self.log_debug("Switched: Point cloud main, Video secondary")
     
     def toggle_edit_mode(self, state):
         """Toggle edit mode for waypoint management."""
+        # Only allow edit mode dalam point cloud view
+        if self.current_view_mode != "pointcloud":
+            self.ui.mcEditMode.setChecked(False)
+            return
+            
         self.edit_mode = state == Qt.Checked
         self.main_point_cloud.set_edit_mode(self.edit_mode)
-        self.secondary_point_cloud.set_edit_mode(self.edit_mode)
         
         # Update UI state
         if self.edit_mode:
@@ -264,16 +378,18 @@ class DroneControlMainWindow(QMainWindow):
     
     def update_view_controls(self, state):
         """Update view controls."""
-        top_down_enabled = state == Qt.Checked
-        self.main_point_cloud.set_top_down_mode(top_down_enabled)
-        self.secondary_point_cloud.set_top_down_mode(top_down_enabled)
-        self.log_debug(f"Top-down view: {'Locked' if top_down_enabled else 'Unlocked'}")
+        # Only apply to point cloud view
+        if self.current_view_mode == "pointcloud":
+            top_down_enabled = state == Qt.Checked
+            self.main_point_cloud.set_top_down_mode(top_down_enabled)
+            self.log_debug(f"Top-down view: {'Locked' if top_down_enabled else 'Unlocked'}")
     
     def update_height_filter(self, value):
         """Update height filtering."""
-        self.main_point_cloud.set_z_filter(max_z=value, enabled=True)
-        self.secondary_point_cloud.set_z_filter(max_z=value, enabled=True)
-        self.log_debug(f"Height filter: {value:.1f}m")
+        # Only apply to point cloud view
+        if self.current_view_mode == "pointcloud":
+            self.main_point_cloud.set_z_filter(max_z=value, enabled=True)
+            self.log_debug(f"Height filter: {value:.1f}m")
     
     def display_frame(self, points):
         """Display new point cloud frame."""
@@ -286,9 +402,14 @@ class DroneControlMainWindow(QMainWindow):
             self.fps = 0.9 * self.fps + 0.1 * (1.0 / time_diff)
         self.last_frame_time = current_time
         
-        # Update both point cloud widgets
+        # Update point cloud widget
         self.main_point_cloud.update_current_frame(points)
-        self.secondary_point_cloud.update_current_frame(points)
+    
+    def update_video_status(self):
+        """Update video stream status."""
+        video_info = self.video_stream.get_video_info()
+        # Could update UI with video stream info
+        pass
     
     def update_tcp_status(self, connected, message):
         """Update TCP connection status."""
@@ -346,11 +467,8 @@ class DroneControlMainWindow(QMainWindow):
                 self.ui.DroneHeight.setText(f"{position.get('z', 0):.2f} meter")
                 
                 # Update point cloud widget dengan drone position
-                if rpy:
+                if rpy and self.current_view_mode == "pointcloud":
                     self.main_point_cloud.update_drone_data(
-                        position['x'], position['y'], rpy['yaw']
-                    )
-                    self.secondary_point_cloud.update_drone_data(
                         position['x'], position['y'], rpy['yaw']
                     )
             
@@ -388,48 +506,67 @@ class DroneControlMainWindow(QMainWindow):
     
     def update_status(self):
         """Update status display."""
-        if self.frame_count > 0:
-            status_text = f"LIVE - Display: {self.fps:.1f} FPS"
+        if self.current_view_mode == "pointcloud":
+            if self.frame_count > 0:
+                status_text = f"LIVE - Point Cloud: {self.fps:.1f} FPS"
+            else:
+                status_text = "Waiting for point cloud data..."
         else:
-            status_text = "Waiting for point cloud data..."
+            video_info = self.video_stream.get_video_info()
+            if video_info['connected']:
+                status_text = f"LIVE - Video: {video_info['fps']:.1f} FPS"
+            else:
+                status_text = "Waiting for video stream..."
         
         # Update command control status
         self.ui.CommandControl.setText("Active" if self.frame_count > 0 else "Idle")
     
     def update_waypoints_table(self):
         """Update waypoints display table."""
+        # Only update jika dalam point cloud mode
+        if self.current_view_mode != "pointcloud":
+            return
+            
         waypoints = self.main_point_cloud.get_waypoints()
         self.ui.mcDisplayData.setRowCount(len(waypoints))
-        
+
+        self.ui.mcDisplayData.setColumnWidth(0, 150)  # Position
+        self.ui.mcDisplayData.setColumnWidth(1, 120)  # Orientation
+        self.ui.mcDisplayData.setColumnWidth(2, 80)   # Edit button
+        self.ui.mcDisplayData.setColumnWidth(3, 100)  # Yaw Enable
+        self.ui.mcDisplayData.setColumnWidth(4, 100)  # Landing
+        self.ui.mcDisplayData.setColumnWidth(5, 230)  # Action
+
         for i, waypoint in enumerate(waypoints):
             pos_x, pos_y = waypoint['position']
-            
-            # Position
+
             from PyQt5.QtWidgets import QTableWidgetItem, QPushButton, QCheckBox
+
+            # Position
             self.ui.mcDisplayData.setItem(i, 0, 
                 QTableWidgetItem(f"({pos_x:.2f}, {pos_y:.2f})"))
-            
+
             # Orientation
             self.ui.mcDisplayData.setItem(i, 1, 
                 QTableWidgetItem(f"{waypoint['orientation']:.3f}"))
-            
+
             # Edit button
             edit_btn = QPushButton("Edit")
             edit_btn.clicked.connect(lambda checked, idx=i: self.edit_waypoint_orientation(idx))
             self.ui.mcDisplayData.setCellWidget(i, 2, edit_btn)
-            
+
             # Yaw Enable
             yaw_check = QCheckBox()
             yaw_check.setChecked(waypoint['yaw_enable'])
             yaw_check.stateChanged.connect(lambda state, idx=i: self.update_waypoint_yaw(idx, state))
             self.ui.mcDisplayData.setCellWidget(i, 3, yaw_check)
-            
+
             # Landing
             land_check = QCheckBox()
             land_check.setChecked(waypoint['landing'])
             land_check.stateChanged.connect(lambda state, idx=i: self.update_waypoint_landing(idx, state))
             self.ui.mcDisplayData.setCellWidget(i, 4, land_check)
-            
+
             # Action
             if waypoint['added']:
                 action_btn = QPushButton("Delete")
@@ -438,9 +575,24 @@ class DroneControlMainWindow(QMainWindow):
                 action_btn = QPushButton("Add")
                 action_btn.clicked.connect(lambda checked, idx=i: self.add_waypoint(idx))
             self.ui.mcDisplayData.setCellWidget(i, 5, action_btn)
+
     
     def update_marker_display(self):
         """Update marker display untuk single command mode."""
+        # Only update jika dalam point cloud mode
+        if self.current_view_mode != "pointcloud":
+            # Clear display and disable controls
+            self.ui.scPositionX.setText("0.00")
+            self.ui.scPositionY.setText("0.00")
+            self.ui.scOrientation.setText("0.0000 rad")
+            self.ui.scYawEnable.setChecked(False)
+            self.ui.scLanding.setChecked(False)
+            self.ui.scEdit.setEnabled(False)
+            self.ui.scSendGoto.setEnabled(False)
+            self.ui.scClearMarker.setEnabled(False)
+            self.current_marker = None
+            return
+        
         marker = self.main_point_cloud.get_marker()
         
         if marker:
@@ -490,7 +642,7 @@ class DroneControlMainWindow(QMainWindow):
     
     def edit_marker_orientation(self):
         """Edit marker orientation menggunakan joystick dialog."""
-        if self.current_marker:
+        if self.current_marker and self.current_view_mode == "pointcloud":
             current_orientation = self.current_marker['orientation']
             
             dialog = JoystickDialog(current_orientation, self)
@@ -501,12 +653,13 @@ class DroneControlMainWindow(QMainWindow):
     
     def clear_marker(self):
         """Clear current marker."""
-        self.main_point_cloud.clear_marker()
-        self.log_debug("Marker cleared")
+        if self.current_view_mode == "pointcloud":
+            self.main_point_cloud.clear_marker()
+            self.log_debug("Marker cleared")
     
     def send_goto_command(self):
         """Send goto command dengan current marker data."""
-        if self.current_marker:
+        if self.current_marker and self.current_view_mode == "pointcloud":
             x, y = self.current_marker['position']
             orientation = self.current_marker['orientation']
             yaw_enable = 1 if self.current_marker['yaw_enable'] else 0
@@ -518,20 +671,23 @@ class DroneControlMainWindow(QMainWindow):
     
     def update_marker_yaw(self, state):
         """Update marker yaw enable state."""
-        if self.current_marker:
+        if self.current_marker and self.current_view_mode == "pointcloud":
             yaw_enable = state == Qt.Checked
             self.main_point_cloud.update_marker(yaw_enable=yaw_enable)
             self.log_debug(f"Marker yaw enable: {yaw_enable}")
     
     def update_marker_landing(self, state):
         """Update marker landing state."""
-        if self.current_marker:
+        if self.current_marker and self.current_view_mode == "pointcloud":
             landing = state == Qt.Checked
             self.main_point_cloud.update_marker(landing=landing)
             self.log_debug(f"Marker landing: {landing}")
     
     def edit_waypoint_orientation(self, index):
         """Edit waypoint orientation."""
+        if self.current_view_mode != "pointcloud":
+            return
+            
         waypoints = self.main_point_cloud.get_waypoints()
         if 0 <= index < len(waypoints):
             current_orientation = waypoints[index]['orientation']
@@ -544,30 +700,38 @@ class DroneControlMainWindow(QMainWindow):
     
     def update_waypoint_yaw(self, index, state):
         """Update waypoint yaw enable state."""
-        yaw_enable = state == Qt.Checked
-        self.main_point_cloud.update_waypoint(index, yaw_enable=yaw_enable)
-        self.log_debug(f"Waypoint {index + 1} yaw enable: {yaw_enable}")
+        if self.current_view_mode == "pointcloud":
+            yaw_enable = state == Qt.Checked
+            self.main_point_cloud.update_waypoint(index, yaw_enable=yaw_enable)
+            self.log_debug(f"Waypoint {index + 1} yaw enable: {yaw_enable}")
     
     def update_waypoint_landing(self, index, state):
         """Update waypoint landing state."""
-        landing = state == Qt.Checked
-        self.main_point_cloud.update_waypoint(index, landing=landing)
-        self.log_debug(f"Waypoint {index + 1} landing: {landing}")
+        if self.current_view_mode == "pointcloud":
+            landing = state == Qt.Checked
+            self.main_point_cloud.update_waypoint(index, landing=landing)
+            self.log_debug(f"Waypoint {index + 1} landing: {landing}")
     
     def add_waypoint(self, index):
         """Add waypoint."""
-        self.main_point_cloud.update_waypoint(index, added=True)
-        waypoints = self.main_point_cloud.get_waypoints()
-        pos = waypoints[index]['position']
-        self.log_debug(f"Waypoint {index + 1} added: ({pos[0]:.2f}, {pos[1]:.2f})")
+        if self.current_view_mode == "pointcloud":
+            self.main_point_cloud.update_waypoint(index, added=True)
+            waypoints = self.main_point_cloud.get_waypoints()
+            pos = waypoints[index]['position']
+            self.log_debug(f"Waypoint {index + 1} added: ({pos[0]:.2f}, {pos[1]:.2f})")
     
     def delete_waypoint(self, index):
         """Delete waypoint."""
-        self.main_point_cloud.delete_waypoint(index)
-        self.log_debug(f"Waypoint {index + 1} deleted")
+        if self.current_view_mode == "pointcloud":
+            self.main_point_cloud.delete_waypoint(index)
+            self.log_debug(f"Waypoint {index + 1} deleted")
     
     def save_current_frame(self):
         """Save current point cloud frame."""
+        if self.current_view_mode != "pointcloud":
+            self.log_debug("Cannot save: not in point cloud view")
+            return
+            
         raw_points = self.main_point_cloud.raw_points
         if len(raw_points) == 0:
             self.log_debug("No frame to save")
@@ -601,6 +765,16 @@ class DroneControlMainWindow(QMainWindow):
         # Update altitude meter display
         # This could be connected to drone altitude control
         pass
+
+    # Alert handlers:
+    def on_battery_low(self, percentage):
+        self.log_debug(f"BATTERY LOW WARNING: {percentage}%")
+        
+    def on_connection_lost(self):
+        self.log_debug("DRONE CONNECTION LOST")
+        
+    def on_emergency_mode(self):
+        self.log_debug("DRONE IN EMERGENCY MODE")
     
     def log_debug(self, message):
         """Log message ke debugging console."""
@@ -623,6 +797,10 @@ class DroneControlMainWindow(QMainWindow):
         """Clean shutdown."""
         print("Shutting down Drone Control Center...")
         
+        # Stop video stream
+        if hasattr(self.video_stream, 'stop_stream'):
+            self.video_stream.stop_stream()
+        
         # Stop TCP server
         self.tcp_receiver.stop_server()
         if self.tcp_thread:
@@ -643,15 +821,3 @@ class DroneControlMainWindow(QMainWindow):
                 pass
         
         event.accept()
-
-
-if __name__ == "__main__":
-    from ui.styles.dark_theme import apply_dark_theme
-    
-    app = QApplication(sys.argv)
-    apply_dark_theme(app)
-    
-    window = DroneControlMainWindow()
-    window.show()
-    
-    sys.exit(app.exec_())

@@ -4,7 +4,7 @@ Professional command interface with single and multiple command modes
 """
 
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel, QPushButton,
+    QWidget, QFrame, QLabel, QPushButton,
     QCheckBox, QDoubleSpinBox, QDial, QTextBrowser
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QRect
