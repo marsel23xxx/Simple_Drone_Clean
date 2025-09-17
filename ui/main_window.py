@@ -25,7 +25,7 @@ from .widgets.joystick_dialog import JoystickDialog
 from core.tcp_receiver import TCPDataReceiver, TCPServerThread
 from core.websocket_client import WebSocketCommandClient, WebSocketCommandThread
 from core.drone_parser import DroneParser
-from .widgets.drone_status_widget import DroneStatusWidget
+
 
 class DroneControlMainWindow(QMainWindow):
     """Main Window yang mengintegrasikan UI design dengan fungsionalitas lengkap."""
@@ -63,8 +63,6 @@ class DroneControlMainWindow(QMainWindow):
         
         # Update asset paths untuk menggunakan path yang benar
         self.update_asset_paths()
-
-        self.update_waypoints_table()
     
     def setup_communication(self):
         """Initialize communication components."""
@@ -76,13 +74,50 @@ class DroneControlMainWindow(QMainWindow):
         self.websocket_client = WebSocketCommandClient()
         self.websocket_thread = None
         
-        # Drone data parser
+        # Drone data parser - Using original DroneParser with flexible initialization
+        self.drone_parser = None
         try:
-            self.drone_parser = DroneParser(port=NETWORK_CONFIG['drone_data_port'])
-            self.drone_parser.start()
-        except Exception as e:
-            print(f"Failed to start drone parser: {e}")
+            print("Initializing DroneParser for JSON UDP telemetry...")
+            
+            # Use original DroneParser with scapy 
+            from core.drone_parser import DroneParser
+            
+            drone_port = NETWORK_CONFIG.get('drone_data_port', 8889)
+            
+            # Try different constructor signatures untuk backward compatibility
+            try:
+                # Try dengan both parameters
+                self.drone_parser = DroneParser(port=drone_port, max_records=1000)
+            except TypeError as e:
+                if "max_records" in str(e):
+                    print("Trying DroneParser with port only...")
+                    # Fallback ke port only jika max_records tidak supported
+                    self.drone_parser = DroneParser(port=drone_port)
+                else:
+                    # Try default constructor
+                    print("Trying DroneParser with default parameters...")
+                    self.drone_parser = DroneParser()
+            
+            # Start with callback untuk real-time processing
+            if self.drone_parser:
+                self.drone_parser.start(callback=self.on_drone_data_received)
+                print(f"DroneParser started successfully - listening on UDP port {drone_port}")
+            
+        except ImportError as e:
+            print(f"DroneParser class not found: {e}")
+            print("Make sure scapy is installed: pip install scapy")
+            print("Make sure drone_parser.py is in core/ directory")
             self.drone_parser = None
+        except Exception as e:
+            print(f"Failed to initialize drone parser: {e}")
+            # Try to create a basic working version
+            try:
+                from core.drone_parser import DroneParser
+                self.drone_parser = DroneParser()
+                self.drone_parser.start()
+                print("DroneParser started with minimal configuration")
+            except:
+                self.drone_parser = None
     
     def setup_functional_widgets(self):
         """Replace placeholder labels dengan functional widgets."""
@@ -110,31 +145,6 @@ class DroneControlMainWindow(QMainWindow):
         
         # Setup edit mode tracking
         self.edit_mode = False
-
-        # Setup drone status widget
-        self.drone_status = DroneStatusWidget()
-        
-        # Pass UI widget references
-        ui_refs = {
-            'DroneTopView': self.ui.DroneTopView,
-            'DroneSideView': self.ui.DroneSideView, 
-            'DroneBottomView': self.ui.DroneBottomView,
-            'DroneBattery': self.ui.DroneBattery,
-            'DronePositionX': self.ui.DronePositionX,
-            'DronePositionY': self.ui.DronePositionY,
-            'DroneHeight': self.ui.DroneHeight,
-            'DroneSpeedX': self.ui.DroneSpeedX,
-            'DroneSpeedY': self.ui.DroneSpeedY,
-            'DroneSpeedZ': self.ui.DroneSpeedZ,
-            'DroneMode': self.ui.DroneMode,
-            'DroneFlightTime': self.ui.DroneFlightTime
-        }
-        self.drone_status.set_ui_widgets(ui_refs)
-        
-        # Connect alerts
-        self.drone_status.battery_low.connect(self.on_battery_low)
-        self.drone_status.connection_lost.connect(self.on_connection_lost)
-        self.drone_status.emergency_mode.connect(self.on_emergency_mode)
     
     def update_asset_paths(self):
         """Update asset paths untuk styling yang menggunakan relative paths."""
@@ -445,26 +455,92 @@ class DroneControlMainWindow(QMainWindow):
             self.ui.CommandConnect.setText("CONNECT")
             self.ui.CommandMode.setText("Disconnected")
     
+    def on_drone_data_received(self, record):
+        """Callback function untuk data yang diterima dari DroneParser asli."""
+        try:
+            # Extract data dari record (format dari DroneParser asli)
+            if not record or 'data' not in record:
+                return
+                
+            # Update drone status widget jika sudah disetup
+            if hasattr(self, 'drone_status') and self.drone_status:
+                self.process_drone_telemetry(record)
+                
+            # Update point cloud widget dengan drone position untuk visualization
+            if self.current_view_mode == "pointcloud":
+                position = self.drone_parser.get_position(record)
+                rpy = self.drone_parser.get_rpy(record)
+                
+                if position and rpy:
+                    self.main_point_cloud.update_drone_data(
+                        position['x'], position['y'], rpy['yaw']
+                    )
+                    
+        except Exception as e:
+            print(f"Error processing drone data: {e}")
+    
+    def process_drone_telemetry(self, record):
+        """Process telemetry data dari DroneParser asli untuk drone status widget."""
+        try:
+            # Get parsed data dari DroneParser asli
+            position = self.drone_parser.get_position(record)
+            rpy = self.drone_parser.get_rpy(record)
+            battery = self.drone_parser.get_battery(record)
+            
+            # Update drone status widget
+            if position:
+                self.drone_status.update_position(
+                    x=position['x'], 
+                    y=position['y'], 
+                    z=position['z']
+                )
+                
+            if rpy:
+                self.drone_status.update_attitude(
+                    roll=rpy['roll'],
+                    pitch=rpy['pitch'], 
+                    yaw=rpy['yaw']
+                )
+                
+            if battery:
+                self.drone_status.update_battery(
+                    percentage=int(battery['percentage'])
+                )
+                
+            # Additional status dari raw data (format JSON dari DroneParser asli)
+            raw_data = record['data']
+            if 'armed' in raw_data:
+                self.drone_status.update_flight_status(
+                    armed=raw_data['armed']
+                )
+                
+            # Update connection status
+            self.drone_status.set_connection_status(True)
+            
+        except Exception as e:
+            print(f"Error processing telemetry: {e}")
+    
     def update_drone_data(self):
-        """Update drone data display."""
+        """Update drone data display - Using original DroneParser."""
         if not self.drone_parser:
             return
             
         try:
+            # Get latest data dari DroneParser asli
             latest_data = self.drone_parser.get_latest()
             if not latest_data:
                 return
                 
+            # Get parsed data using original methods
             position = self.drone_parser.get_position(latest_data)
-            rpy = self.drone_parser.get_rpy(latest_data)
-            velocity = self.drone_parser.get_velocity(latest_data)
+            rpy = self.drone_parser.get_rpy(latest_data)  
             battery = self.drone_parser.get_battery(latest_data)
-            status = self.drone_parser.get_status(latest_data)
             
+            # Update UI labels directly
             if position:
                 self.ui.DronePositionX.setText(f"[{position['x']:.2f}] m")
-                self.ui.DronePositionY.setText(f"[{position['y']:.2f}] m")
-                self.ui.DroneHeight.setText(f"{position.get('z', 0):.2f} meter")
+                self.ui.DronePositionY.setText(f"[{position['y']:.2f}] m") 
+                self.ui.DroneHeight.setText(f"{position['z']:.2f} meter")
                 
                 # Update point cloud widget dengan drone position
                 if rpy and self.current_view_mode == "pointcloud":
@@ -472,37 +548,76 @@ class DroneControlMainWindow(QMainWindow):
                         position['x'], position['y'], rpy['yaw']
                     )
             
-            if velocity:
-                self.ui.DroneSpeedX.setText(f"[{velocity['vx']:.2f}] m/s")
-                self.ui.DroneSpeedY.setText(f"[{velocity['vy']:.2f}] m/s")
-                self.ui.DroneSpeedZ.setText(f"[{velocity['vz']:.2f}] m/s")
-            
             if battery:
-                self.ui.DroneBattery.setValue(battery['percentage'])
+                percentage = int(battery['percentage'])
+                self.ui.DroneBattery.setValue(percentage)
                 
                 # Update battery color berdasarkan level
-                if battery['percentage'] < 20:
-                    self.ui.DroneBattery.setStyleSheet("""
-                        QProgressBar::chunk { background-color: #e63946; }
-                    """)
-                elif battery['percentage'] < 50:
-                    self.ui.DroneBattery.setStyleSheet("""
-                        QProgressBar::chunk { background-color: #f77f00; }
-                    """)
+                if percentage < 20:
+                    color = "#e63946"  # Red
+                elif percentage < 50:
+                    color = "#f77f00"  # Orange
                 else:
-                    self.ui.DroneBattery.setStyleSheet("""
-                        QProgressBar::chunk { background-color: #3ddb55; }
-                    """)
+                    color = "#3ddb55"  # Green
+                    
+                self.ui.DroneBattery.setStyleSheet(f"""
+                    QProgressBar::chunk {{ background-color: {color}; }}
+                """)
             
-            if status:
-                self.ui.DroneMode.setText(status.get('mode', 'Auto'))
-                if 'flight_time' in status:
-                    minutes = status['flight_time'] // 60
-                    seconds = status['flight_time'] % 60
-                    self.ui.DroneFlightTime.setText(f"{minutes:02d}:{seconds:02d}")
+            # Update status from raw JSON data
+            raw_data = latest_data.get('data', {})
+            if 'armed' in raw_data:
+                mode_text = "ARMED" if raw_data['armed'] else "DISARMED"
+                self.ui.DroneMode.setText(mode_text)
+                
+                # Color coding berdasarkan armed status
+                if raw_data['armed']:
+                    self.ui.DroneMode.setStyleSheet("color: #e63946;")  # Red untuk armed
+                else:
+                    self.ui.DroneMode.setStyleSheet("color: #3ddb55;")  # Green untuk disarmed
+            
+            # Update drone status widget jika sudah disetup
+            if hasattr(self, 'drone_status') and self.drone_status:
+                self.update_drone_status_widget_original(position, rpy, battery, raw_data)
+                    
+        except Exception as e:
+            # Silently handle errors, but log for debugging
+            pass
+    
+    def update_drone_status_widget_original(self, position, rpy, battery, raw_data):
+        """Update drone status widget dengan data dari DroneParser asli."""
+        try:
+            if position:
+                self.drone_status.update_position(
+                    x=position['x'], 
+                    y=position['y'], 
+                    z=position['z']
+                )
+                
+            if rpy:
+                self.drone_status.update_attitude(
+                    roll=rpy['roll'],
+                    pitch=rpy['pitch'], 
+                    yaw=rpy['yaw']
+                )
+                
+            if battery:
+                self.drone_status.update_battery(
+                    percentage=int(battery['percentage']),
+                    voltage=battery.get('voltage', 0.0)
+                )
+            
+            # Status dari raw JSON data
+            if 'armed' in raw_data:
+                self.drone_status.update_flight_status(
+                    armed=raw_data['armed']
+                )
+                
+            # Update connection status
+            self.drone_status.set_connection_status(True)
             
         except Exception as e:
-            pass  # Silently handle errors
+            print(f"Error updating drone status widget: {e}")
     
     def update_status(self):
         """Update status display."""
@@ -529,44 +644,36 @@ class DroneControlMainWindow(QMainWindow):
             
         waypoints = self.main_point_cloud.get_waypoints()
         self.ui.mcDisplayData.setRowCount(len(waypoints))
-
-        self.ui.mcDisplayData.setColumnWidth(0, 150)  # Position
-        self.ui.mcDisplayData.setColumnWidth(1, 120)  # Orientation
-        self.ui.mcDisplayData.setColumnWidth(2, 80)   # Edit button
-        self.ui.mcDisplayData.setColumnWidth(3, 100)  # Yaw Enable
-        self.ui.mcDisplayData.setColumnWidth(4, 100)  # Landing
-        self.ui.mcDisplayData.setColumnWidth(5, 230)  # Action
-
+        
         for i, waypoint in enumerate(waypoints):
             pos_x, pos_y = waypoint['position']
-
-            from PyQt5.QtWidgets import QTableWidgetItem, QPushButton, QCheckBox
-
+            
             # Position
+            from PyQt5.QtWidgets import QTableWidgetItem, QPushButton, QCheckBox
             self.ui.mcDisplayData.setItem(i, 0, 
                 QTableWidgetItem(f"({pos_x:.2f}, {pos_y:.2f})"))
-
+            
             # Orientation
             self.ui.mcDisplayData.setItem(i, 1, 
                 QTableWidgetItem(f"{waypoint['orientation']:.3f}"))
-
+            
             # Edit button
             edit_btn = QPushButton("Edit")
             edit_btn.clicked.connect(lambda checked, idx=i: self.edit_waypoint_orientation(idx))
             self.ui.mcDisplayData.setCellWidget(i, 2, edit_btn)
-
+            
             # Yaw Enable
             yaw_check = QCheckBox()
             yaw_check.setChecked(waypoint['yaw_enable'])
             yaw_check.stateChanged.connect(lambda state, idx=i: self.update_waypoint_yaw(idx, state))
             self.ui.mcDisplayData.setCellWidget(i, 3, yaw_check)
-
+            
             # Landing
             land_check = QCheckBox()
             land_check.setChecked(waypoint['landing'])
             land_check.stateChanged.connect(lambda state, idx=i: self.update_waypoint_landing(idx, state))
             self.ui.mcDisplayData.setCellWidget(i, 4, land_check)
-
+            
             # Action
             if waypoint['added']:
                 action_btn = QPushButton("Delete")
@@ -575,7 +682,6 @@ class DroneControlMainWindow(QMainWindow):
                 action_btn = QPushButton("Add")
                 action_btn.clicked.connect(lambda checked, idx=i: self.add_waypoint(idx))
             self.ui.mcDisplayData.setCellWidget(i, 5, action_btn)
-
     
     def update_marker_display(self):
         """Update marker display untuk single command mode."""
@@ -765,16 +871,6 @@ class DroneControlMainWindow(QMainWindow):
         # Update altitude meter display
         # This could be connected to drone altitude control
         pass
-
-    # Alert handlers:
-    def on_battery_low(self, percentage):
-        self.log_debug(f"BATTERY LOW WARNING: {percentage}%")
-        
-    def on_connection_lost(self):
-        self.log_debug("DRONE CONNECTION LOST")
-        
-    def on_emergency_mode(self):
-        self.log_debug("DRONE IN EMERGENCY MODE")
     
     def log_debug(self, message):
         """Log message ke debugging console."""
@@ -798,26 +894,46 @@ class DroneControlMainWindow(QMainWindow):
         print("Shutting down Drone Control Center...")
         
         # Stop video stream
-        if hasattr(self.video_stream, 'stop_stream'):
+        if hasattr(self, 'video_stream') and hasattr(self.video_stream, 'stop_stream'):
             self.video_stream.stop_stream()
         
         # Stop TCP server
-        self.tcp_receiver.stop_server()
-        if self.tcp_thread:
+        if hasattr(self, 'tcp_receiver'):
+            self.tcp_receiver.stop_server()
+        if hasattr(self, 'tcp_thread') and self.tcp_thread:
             self.tcp_thread.quit()
             self.tcp_thread.wait()
         
         # Stop WebSocket client
-        self.websocket_client.stop_client()
-        if self.websocket_thread:
+        if hasattr(self, 'websocket_client'):
+            self.websocket_client.stop_client()
+        if hasattr(self, 'websocket_thread') and self.websocket_thread:
             self.websocket_thread.quit()
             self.websocket_thread.wait()
         
-        # Stop drone parser
-        if self.drone_parser:
+        # Stop original DroneParser dengan scapy
+        if hasattr(self, 'drone_parser') and self.drone_parser:
             try:
+                print("Stopping drone parser...")
                 self.drone_parser.stop()
-            except:
-                pass
+                
+                # Save captured data jika ada (original DroneParser method)
+                if len(self.drone_parser) > 0:
+                    filename = f"drone_telemetry_{int(time.time())}.json"
+                    saved_file = self.drone_parser.save_data(filename)
+                    print(f"Saved {len(self.drone_parser)} telemetry records to {saved_file}")
+                else:
+                    print("No telemetry data to save")
+                    
+            except Exception as e:
+                print(f"Error stopping drone parser: {e}")
+        
+        # Save waypoints
+        if hasattr(self, 'main_point_cloud'):
+            try:
+                self.main_point_cloud.save_waypoints_to_json()
+                print("Waypoints saved")
+            except Exception as e:
+                print(f"Error saving waypoints: {e}")
         
         event.accept()

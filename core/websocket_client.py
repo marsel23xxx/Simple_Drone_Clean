@@ -1,10 +1,6 @@
-"""
-WebSocket Command Client for Drone Control
-Handles command communication with drone via WebSocket
-"""
-
 import asyncio
 import websockets
+from websockets.exceptions import ConnectionClosed
 from PyQt5.QtCore import QObject, QThread, pyqtSignal
 
 from config.settings import NETWORK_CONFIG, COMMAND_CONFIG
@@ -35,7 +31,7 @@ class WebSocketCommandClient(QObject):
                 print(f"Connecting to command WebSocket {uri}...")
                 self.websocket = await websockets.connect(
                     uri, 
-                    timeout=NETWORK_CONFIG['connection_timeout']
+                    open_timeout=NETWORK_CONFIG['connection_timeout']
                 )
                 self.connected = True
                 self.retry_count = 0
@@ -69,8 +65,17 @@ class WebSocketCommandClient(QObject):
         try:
             while self.running and self.connected:
                 await asyncio.sleep(10)  # Ping every 10 seconds
-                if self.websocket and not self.websocket.closed:
-                    await self.websocket.ping()
+                if self.websocket:
+                    try:
+                        # For websockets 15.0+, connection is automatically managed
+                        # Just check if we can ping without accessing closed attribute
+                        await asyncio.wait_for(self.websocket.ping(), timeout=5)
+                    except (ConnectionClosed, asyncio.TimeoutError) as e:
+                        print(f"Connection lost during ping: {e}")
+                        break
+                    except Exception as ping_error:
+                        print(f"Ping failed: {ping_error}")
+                        break
                 else:
                     break
         except Exception as e:
@@ -85,7 +90,8 @@ class WebSocketCommandClient(QObject):
             return False
         
         try:
-            # Validate command
+            # For websockets 15.0+, just try to send - connection management is automatic
+            # Validate command first
             if not self.validate_command(command):
                 print(f"Invalid command: {command}")
                 self.command_sent.emit(command, False)
@@ -101,6 +107,12 @@ class WebSocketCommandClient(QObject):
             self.command_sent.emit(command, True)
             return True
             
+        except ConnectionClosed as e:
+            print(f"WebSocket connection closed: {e}")
+            self.connected = False
+            self.connection_status.emit(False, "Connection closed")
+            self.command_sent.emit(command, False)
+            return False
         except asyncio.TimeoutError:
             print(f"Command timeout: {command}")
             self.command_sent.emit(command, False)

@@ -108,35 +108,71 @@ class WaypointManager:
             return False
     
     def load_from_json(self) -> bool:
-        """Load waypoints from JSON file."""
+        """Load waypoints from JSON file with better error handling."""
         try:
             if not self.coordinates_file.exists():
-                print(f"Coordinates file {self.coordinates_file} does not exist")
-                return False
+                print(f"Creating default coordinates file at {self.coordinates_file}")
+                # Create empty coordinates file
+                with open(self.coordinates_file, 'w') as f:
+                    json.dump([], f, indent=2)
+                return True
             
             with open(self.coordinates_file, 'r') as f:
-                coordinates_array = json.load(f)
+                content = f.read().strip()
+                
+            if not content:
+                print(f"Coordinates file is empty, initializing with empty array")
+                # File exists but empty, create empty array
+                coordinates_array = []
+                # Write empty array to fix the file
+                with open(self.coordinates_file, 'w') as f:
+                    json.dump([], f, indent=2)
+            else:
+                try:
+                    coordinates_array = json.loads(content)
+                except json.JSONDecodeError as json_error:
+                    print(f"Invalid JSON in coordinates file: {json_error}")
+                    print("Creating new empty coordinates file")
+                    coordinates_array = []
+                    # Backup corrupted file and create new one
+                    backup_name = str(self.coordinates_file) + '.backup'
+                    import shutil
+                    shutil.move(str(self.coordinates_file), backup_name)
+                    with open(self.coordinates_file, 'w') as f:
+                        json.dump([], f, indent=2)
             
             # Clear existing waypoints
             self.waypoints.clear()
             
             # Convert from JSON format to waypoint objects
             for coord in coordinates_array:
-                if len(coord) >= 5:  # Ensure we have all required fields
-                    waypoint = {
-                        'position': (float(coord[0]), float(coord[1])),
-                        'orientation': float(coord[2]),
-                        'yaw_enable': bool(coord[3]),
-                        'landing': bool(coord[4]),
-                        'added': True  # All loaded waypoints are considered added
-                    }
-                    self.waypoints.append(waypoint)
+                if isinstance(coord, list) and len(coord) >= 5:
+                    try:
+                        waypoint = {
+                            'position': (float(coord[0]), float(coord[1])),
+                            'orientation': float(coord[2]),
+                            'yaw_enable': bool(coord[3]),
+                            'landing': bool(coord[4]),
+                            'added': True  # All loaded waypoints are considered added
+                        }
+                        self.waypoints.append(waypoint)
+                    except (ValueError, TypeError) as e:
+                        print(f"Skipping invalid waypoint data: {coord} - {e}")
+                        continue
             
             print(f"Loaded {len(self.waypoints)} waypoints from {self.coordinates_file}")
             return True
             
         except Exception as e:
             print(f"Error loading waypoints from JSON: {e}")
+            # Create empty file on any error
+            try:
+                with open(self.coordinates_file, 'w') as f:
+                    json.dump([], f, indent=2)
+                print("Created new empty coordinates file")
+            except Exception as create_error:
+                print(f"Failed to create new coordinates file: {create_error}")
+            
             self.waypoints.clear()
             return False
     

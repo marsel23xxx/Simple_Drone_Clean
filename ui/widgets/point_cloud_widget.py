@@ -90,8 +90,8 @@ class SmoothPointCloudWidget(QWidget):
     def load_drone_image(self):
         """Load drone PNG image."""
         try:
-            if ASSET_PATHS['drone_png'].exists():
-                self.drone_image = QPixmap(str(ASSET_PATHS['drone_png']))
+            if ASSET_PATHS['drone_top'].exists():
+                self.drone_image = QPixmap(str(ASSET_PATHS['drone_top']))
                 if self.drone_image.isNull():
                     print("Failed to load drone image")
                     self.drone_image = None
