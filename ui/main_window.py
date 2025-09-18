@@ -216,7 +216,7 @@ class DroneControlMainWindow(QMainWindow):
         self.ui.mcHover.clicked.connect(lambda: self.send_websocket_command("hover"))
         self.ui.mcHome.clicked.connect(lambda: self.send_websocket_command("home"))
         self.ui.mcSaveMaps.clicked.connect(self.save_current_frame)
-        self.ui.mcSendCommand.clicked.connect(lambda: self.send_websocket_command("start"))
+        self.ui.mcSendCommand.clicked.connect(self.send_multiple_commands)  # Changed this line
         self.ui.mcDialOrientation.valueChanged.connect(self.on_orientation_dial_changed)
         
         # Altitude slider
@@ -819,18 +819,112 @@ class DroneControlMainWindow(QMainWindow):
             self.log_debug(f"Waypoint {index + 1} landing: {landing}")
     
     def add_waypoint(self, index):
-        """Add waypoint."""
+        """Add waypoint dan kirim ke server."""
         if self.current_view_mode == "pointcloud":
             self.main_point_cloud.update_waypoint(index, added=True)
             waypoints = self.main_point_cloud.get_waypoints()
             pos = waypoints[index]['position']
             self.log_debug(f"Waypoint {index + 1} added: ({pos[0]:.2f}, {pos[1]:.2f})")
+            
+            # Send updated waypoints ke server
+            self.send_waypoints_to_server()
     
     def delete_waypoint(self, index):
-        """Delete waypoint."""
+        """Delete waypoint dan kirim ke server."""
         if self.current_view_mode == "pointcloud":
             self.main_point_cloud.delete_waypoint(index)
             self.log_debug(f"Waypoint {index + 1} deleted")
+            
+            # Send updated waypoints ke server
+            self.send_waypoints_to_server()
+    
+    def send_multiple_commands(self):
+        """Send multiple commands - waypoints and start mission."""
+        if self.current_view_mode != "pointcloud":
+            self.log_debug("Cannot send waypoints: not in point cloud view")
+            return
+        
+        try:
+            # First, send all waypoints to server
+            waypoints = self.main_point_cloud.get_waypoints()
+            added_waypoints = [wp for wp in waypoints if wp.get('added', False)]
+            
+            if len(added_waypoints) == 0:
+                self.log_debug("No waypoints to send - Add waypoints first")
+                return
+            
+            # Format waypoints untuk server
+            waypoints_data = []
+            for wp in added_waypoints:
+                pos_x, pos_y = wp['position']
+                waypoints_data.append([
+                    float(pos_x),
+                    float(pos_y), 
+                    float(wp['orientation']),
+                    int(wp['yaw_enable']),
+                    int(wp['landing'])
+                ])
+            
+            # Send waypoints command
+            waypoints_command = f"waypoints {waypoints_data}"
+            waypoints_success = self.send_websocket_command(waypoints_command)
+            
+            if waypoints_success:
+                self.log_debug(f"Sent {len(waypoints_data)} waypoints to server")
+                
+                # Wait a moment, then send start command
+                import time
+                time.sleep(0.1)  # Short delay
+                
+                start_success = self.send_websocket_command("start")
+                if start_success:
+                    self.log_debug("Mission started")
+                else:
+                    self.log_debug("Failed to start mission")
+            else:
+                self.log_debug("Failed to send waypoints - mission not started")
+                
+        except Exception as e:
+            self.log_debug(f"Error in send_multiple_commands: {e}")
+            print(f"Error sending multiple commands: {e}")
+    
+    def send_waypoints_to_server(self):
+        """Send all added waypoints ke WebSocket server."""
+        try:
+            waypoints = self.main_point_cloud.get_waypoints()
+            added_waypoints = [wp for wp in waypoints if wp.get('added', False)]
+            
+            if len(added_waypoints) == 0:
+                self.log_debug("No waypoints to send")
+                return False
+            
+            # Format waypoints untuk server: [x, y, orientation, yaw_enable, landing]
+            waypoints_data = []
+            for wp in added_waypoints:
+                pos_x, pos_y = wp['position']
+                waypoints_data.append([
+                    float(pos_x),
+                    float(pos_y), 
+                    float(wp['orientation']),
+                    int(wp['yaw_enable']),
+                    int(wp['landing'])
+                ])
+            
+            # Send command dengan waypoints data
+            waypoints_command = f"waypoints {waypoints_data}"
+            success = self.send_websocket_command(waypoints_command)
+            
+            if success:
+                self.log_debug(f"Sent {len(waypoints_data)} waypoints to server")
+                return True
+            else:
+                self.log_debug(f"Failed to send waypoints to server")
+                return False
+                
+        except Exception as e:
+            self.log_debug(f"Error sending waypoints: {e}")
+            print(f"Error sending waypoints to server: {e}")
+            return False
     
     def save_current_frame(self):
         """Save current point cloud frame."""
