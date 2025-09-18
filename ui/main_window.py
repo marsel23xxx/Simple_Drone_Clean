@@ -853,24 +853,22 @@ class DroneControlMainWindow(QMainWindow):
                 self.log_debug("No waypoints to send - Add waypoints first")
                 return
             
-            # Format waypoints untuk server
-            waypoints_data = []
-            for wp in added_waypoints:
+            # Format waypoints sebagai string
+            waypoints_strings = []
+            for i, wp in enumerate(added_waypoints):
                 pos_x, pos_y = wp['position']
-                waypoints_data.append([
-                    float(pos_x),
-                    float(pos_y), 
-                    float(wp['orientation']),
-                    int(wp['yaw_enable']),
-                    int(wp['landing'])
-                ])
+                waypoint_str = f"[{pos_x:.2f},{pos_y:.2f},{wp['orientation']:.3f},{int(wp['yaw_enable'])},{int(wp['landing'])}]"
+                waypoints_strings.append(waypoint_str)
             
-            # Send waypoints command
-            waypoints_command = f"waypoints {waypoints_data}"
+            # Join all waypoints sebagai single string
+            waypoints_data_str = ",".join(waypoints_strings)
+            
+            # Send waypoints command as string
+            waypoints_command = f"waypoints {waypoints_data_str}"
             waypoints_success = self.send_websocket_command(waypoints_command)
             
             if waypoints_success:
-                self.log_debug(f"Sent {len(waypoints_data)} waypoints to server")
+                self.log_debug(f"Sent {len(waypoints_strings)} waypoints to server as string")
                 
                 # Wait a moment, then send start command
                 import time
@@ -889,7 +887,7 @@ class DroneControlMainWindow(QMainWindow):
             print(f"Error sending multiple commands: {e}")
     
     def send_waypoints_to_server(self):
-        """Send all added waypoints ke WebSocket server."""
+        """Send all added waypoints ke WebSocket server as string."""
         try:
             waypoints = self.main_point_cloud.get_waypoints()
             added_waypoints = [wp for wp in waypoints if wp.get('added', False)]
@@ -898,24 +896,22 @@ class DroneControlMainWindow(QMainWindow):
                 self.log_debug("No waypoints to send")
                 return False
             
-            # Format waypoints untuk server: [x, y, orientation, yaw_enable, landing]
-            waypoints_data = []
+            # Format waypoints sebagai string
+            waypoints_strings = []
             for wp in added_waypoints:
                 pos_x, pos_y = wp['position']
-                waypoints_data.append([
-                    float(pos_x),
-                    float(pos_y), 
-                    float(wp['orientation']),
-                    int(wp['yaw_enable']),
-                    int(wp['landing'])
-                ])
+                waypoint_str = f"[{pos_x:.2f},{pos_y:.2f},{wp['orientation']:.3f},{int(wp['yaw_enable'])},{int(wp['landing'])}]"
+                waypoints_strings.append(waypoint_str)
             
-            # Send command dengan waypoints data
-            waypoints_command = f"waypoints {waypoints_data}"
+            # Join all waypoints sebagai single string
+            waypoints_data_str = ",".join(waypoints_strings)
+            
+            # Send command dengan waypoints data as string
+            waypoints_command = f"waypoints {waypoints_data_str}"
             success = self.send_websocket_command(waypoints_command)
             
             if success:
-                self.log_debug(f"Sent {len(waypoints_data)} waypoints to server")
+                self.log_debug(f"Sent {len(waypoints_strings)} waypoints to server as string")
                 return True
             else:
                 self.log_debug(f"Failed to send waypoints to server")
