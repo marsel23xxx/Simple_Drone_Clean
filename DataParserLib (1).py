@@ -48,6 +48,7 @@ Requirements: pip install scapy
 """
 
 import json
+import time
 import threading
 from scapy.all import sniff, UDP, IP
 from datetime import datetime
@@ -165,6 +166,24 @@ class DroneParser:
             'yaw_deg': attitude[2] * 57.2958
         }
     
+    def get_velocity(self, record: Optional[Dict] = None) -> Optional[Dict[str, float]]:
+        """Extract RPY data from a record"""
+        if record is None:
+            record = self.get_latest()
+        
+        if not record or 'velocity' not in record['data']:
+            return None
+        
+        velocity = record['data']['velocity']
+        if len(velocity) < 3:
+            return None
+        
+        return {
+            'xspeed': velocity[0],
+            'yspeed': velocity[1], 
+            'zspeed': velocity[2],
+        }
+    
     def get_position(self, record: Optional[Dict] = None) -> Optional[Dict[str, float]]:
         """Extract position data from a record"""
         if record is None:
@@ -245,30 +264,23 @@ def print_data(record):
 
 # Simple usage example
 if __name__ == "__main__":
-    parser = DroneParser()
+    parser = DroneParser(port=8889)
+    parser.start()
     
-    print("Starting drone data capture... (Ctrl+C to stop)")
-    try:
-        parser.start(callback=print_data)
+    while True:
+        # Get latest data
+        latest = parser.get_latest()
+        rpy = parser.get_rpy()         # Roll/pitch/yaw in rad & degrees
+        pos = parser.get_position()    # XYZ position + altitude
+        bat = parser.get_battery()     # Battery % and voltage
+        vel = parser.get_velocity()   # Velocity in m/s
         
-        # Keep running until interrupted
-        import time
-        while True:
-            time.sleep(1)
-            
-    except KeyboardInterrupt:
-        print(f"\nStopping... Captured {len(parser)} records")
+        print(rpy)
+        print(pos)
+        print(bat)
+        print(vel)
+        time.sleep(1)
+        
+        # Save and stop
+        parser.save_data("flight.json")
         parser.stop()
-        
-        # Save data
-        filename = parser.save_data()
-        print(f"Data saved to: {filename}")
-        
-        # Show latest XYZ and RPY data
-        pos = parser.get_position()
-        if pos:
-            print(f"Latest Position: {pos}")
-        
-        rpy = parser.get_rpy()
-        if rpy:
-            print(f"Latest RPY: {rpy}")

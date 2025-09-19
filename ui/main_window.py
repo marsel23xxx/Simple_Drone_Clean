@@ -1,16 +1,15 @@
 """
-Main Window Implementation
-Drone Control Center Main Window dengan integrasi video streaming
+main_window.py (CLEANED VERSION)
+
+Drone Control Center Main Window dengan integrasi telemetry yang bersih
 """
 
 import sys
 import time
 import threading
 from pathlib import Path
-
 from PyQt5.QtWidgets import QMainWindow, QApplication, QLabel
-from PyQt5.QtCore import QTimer, Qt, pyqtSignal
-from PyQt5.QtGui import QPixmap
+from PyQt5.QtCore import QTimer, Qt
 
 # Import UI yang sudah dibuat
 from activity_ui import Ui_MainWindow
@@ -26,7 +25,8 @@ from core.tcp_receiver import TCPDataReceiver, TCPServerThread
 from core.websocket_client import WebSocketCommandClient, WebSocketCommandThread
 from core.drone_parser import DroneParser
 
-
+# Import telemetry handler
+from .widgets.drone_telemetry_handler import DroneTelemetryHandler
 class DroneControlMainWindow(QMainWindow):
     """Main Window yang mengintegrasikan UI design dengan fungsionalitas lengkap."""
     
@@ -65,7 +65,7 @@ class DroneControlMainWindow(QMainWindow):
         self.update_asset_paths()
     
     def setup_communication(self):
-        """Initialize communication components."""
+        """Initialize communication components with UDP telemetry handler."""
         # TCP server for point cloud data
         self.tcp_receiver = TCPDataReceiver()
         self.tcp_thread = None
@@ -74,50 +74,39 @@ class DroneControlMainWindow(QMainWindow):
         self.websocket_client = WebSocketCommandClient()
         self.websocket_thread = None
         
-        # Drone data parser - Using original DroneParser with flexible initialization
+        # Initialize drone parser for UDP telemetry
         self.drone_parser = None
+        self.telemetry_handler = None
+        
         try:
-            print("Initializing DroneParser for JSON UDP telemetry...")
-            
-            # Use original DroneParser with scapy 
-            from core.drone_parser import DroneParser
+            print("Initializing DroneParser for UDP telemetry capture...")
             
             drone_port = NETWORK_CONFIG.get('drone_data_port', 8889)
             
-            # Try different constructor signatures untuk backward compatibility
+            # Initialize DroneParser
             try:
-                # Try dengan both parameters
                 self.drone_parser = DroneParser(port=drone_port, max_records=1000)
-            except TypeError as e:
-                if "max_records" in str(e):
-                    print("Trying DroneParser with port only...")
-                    # Fallback ke port only jika max_records tidak supported
+            except TypeError:
+                try:
                     self.drone_parser = DroneParser(port=drone_port)
-                else:
-                    # Try default constructor
-                    print("Trying DroneParser with default parameters...")
+                except:
                     self.drone_parser = DroneParser()
             
-            # Start with callback untuk real-time processing
+            # Create telemetry handler
             if self.drone_parser:
-                self.drone_parser.start(callback=self.on_drone_data_received)
-                print(f"DroneParser started successfully - listening on UDP port {drone_port}")
+                self.telemetry_handler = DroneTelemetryHandler(self, self.drone_parser)
+                
+                # Start UDP packet capture with telemetry handler callback
+                self.drone_parser.start(callback=self.telemetry_handler.on_udp_packet_received)
+                print(f"DroneParser started - capturing UDP packets on port {drone_port}")
             
         except ImportError as e:
-            print(f"DroneParser class not found: {e}")
+            print(f"DroneParser import failed: {e}")
             print("Make sure scapy is installed: pip install scapy")
-            print("Make sure drone_parser.py is in core/ directory")
             self.drone_parser = None
         except Exception as e:
-            print(f"Failed to initialize drone parser: {e}")
-            # Try to create a basic working version
-            try:
-                from core.drone_parser import DroneParser
-                self.drone_parser = DroneParser()
-                self.drone_parser.start()
-                print("DroneParser started with minimal configuration")
-            except:
-                self.drone_parser = None
+            print(f"Failed to initialize UDP drone parser: {e}")
+            self.drone_parser = None
     
     def setup_functional_widgets(self):
         """Replace placeholder labels dengan functional widgets."""
@@ -216,7 +205,7 @@ class DroneControlMainWindow(QMainWindow):
         self.ui.mcHover.clicked.connect(lambda: self.send_websocket_command("hover"))
         self.ui.mcHome.clicked.connect(lambda: self.send_websocket_command("home"))
         self.ui.mcSaveMaps.clicked.connect(self.save_current_frame)
-        self.ui.mcSendCommand.clicked.connect(self.send_multiple_commands)  # Changed this line
+        self.ui.mcSendCommand.clicked.connect(self.send_multiple_commands)
         self.ui.mcDialOrientation.valueChanged.connect(self.on_orientation_dial_changed)
         
         # Altitude slider
@@ -228,12 +217,6 @@ class DroneControlMainWindow(QMainWindow):
         self.status_timer = QTimer()
         self.status_timer.timeout.connect(self.update_status)
         self.status_timer.start(UI_CONFIG['update_intervals']['status_update'])
-        
-        # Drone data update timer
-        if self.drone_parser:
-            self.drone_timer = QTimer()
-            self.drone_timer.timeout.connect(self.update_drone_data)
-            self.drone_timer.start(UI_CONFIG['update_intervals']['drone_data'])
     
     def start_services(self):
         """Start communication services."""
@@ -250,11 +233,7 @@ class DroneControlMainWindow(QMainWindow):
             self.tcp_thread.start()
     
     def start_video_stream(self, stream_url=None):
-        """Start video streaming.
-        
-        Args:
-            stream_url: RTSP URL atau TCP endpoint untuk video stream
-        """
+        """Start video streaming."""
         # Example: Start RTSP stream
         if stream_url and stream_url.startswith('rtsp://'):
             # Replace current video widget dengan RTSP widget
@@ -281,6 +260,7 @@ class DroneControlMainWindow(QMainWindow):
                 self.video_stream.set_tcp_receiver(self.tcp_receiver)
                 self.log_debug("TCP video stream configured")
     
+    # WebSocket methods
     def toggle_connection(self):
         """Toggle WebSocket connection."""
         if self.websocket_client.connected:
@@ -310,9 +290,13 @@ class DroneControlMainWindow(QMainWindow):
             if not success:
                 print(f"Failed to send command: {command}")
                 self.log_debug(f"Failed to send: {command}")
+                return False
+            else:
+                return True
         else:
             print(f"Cannot send command '{command}': WebSocket not connected")
             self.log_debug(f"Cannot send '{command}': Not connected")
+            return True
     
     def emergency_stop(self):
         """Emergency stop command."""
@@ -320,6 +304,7 @@ class DroneControlMainWindow(QMainWindow):
         self.log_debug("EMERGENCY STOP ACTIVATED")
         print("EMERGENCY STOP ACTIVATED")
     
+    # View and display methods
     def switch_views(self):
         """Switch/swap positions between point cloud and video stream widgets."""
         # Get current geometries dan parents
@@ -346,60 +331,25 @@ class DroneControlMainWindow(QMainWindow):
         
         # Toggle main view mode untuk waypoint controls
         if self.current_view_mode == "pointcloud":
-            # Point cloud sekarang di area kecil, video di area besar
             self.current_view_mode = "video"
             self.ui.DroneSwitch.setText("Point Cloud Main")
             
-            # Disable waypoint controls karena point cloud tidak di main area
+            # Disable waypoint controls
             self.ui.mcEditMode.setEnabled(False)
             self.ui.scEdit.setEnabled(False)
             self.ui.scSendGoto.setEnabled(False)
             self.ui.scClearMarker.setEnabled(False)
             
             self.log_debug("Switched: Video main, Point cloud secondary")
-            
         else:
-            # Point cloud kembali ke area besar, video di area kecil
             self.current_view_mode = "pointcloud"
             self.ui.DroneSwitch.setText("Video Main")
             
-            # Re-enable waypoint controls karena point cloud di main area
+            # Re-enable waypoint controls
             self.ui.mcEditMode.setEnabled(True)
-            self.update_marker_display()  # Refresh control states
+            self.update_marker_display()
             
             self.log_debug("Switched: Point cloud main, Video secondary")
-    
-    def toggle_edit_mode(self, state):
-        """Toggle edit mode for waypoint management."""
-        # Only allow edit mode dalam point cloud view
-        if self.current_view_mode != "pointcloud":
-            self.ui.mcEditMode.setChecked(False)
-            return
-            
-        self.edit_mode = state == Qt.Checked
-        self.main_point_cloud.set_edit_mode(self.edit_mode)
-        
-        # Update UI state
-        if self.edit_mode:
-            self.update_waypoints_table()
-            self.log_debug("Edit mode enabled")
-        else:
-            self.log_debug("Edit mode disabled")
-    
-    def update_view_controls(self, state):
-        """Update view controls."""
-        # Only apply to point cloud view
-        if self.current_view_mode == "pointcloud":
-            top_down_enabled = state == Qt.Checked
-            self.main_point_cloud.set_top_down_mode(top_down_enabled)
-            self.log_debug(f"Top-down view: {'Locked' if top_down_enabled else 'Unlocked'}")
-    
-    def update_height_filter(self, value):
-        """Update height filtering."""
-        # Only apply to point cloud view
-        if self.current_view_mode == "pointcloud":
-            self.main_point_cloud.set_z_filter(max_z=value, enabled=True)
-            self.log_debug(f"Height filter: {value:.1f}m")
     
     def display_frame(self, points):
         """Display new point cloud frame."""
@@ -421,6 +371,24 @@ class DroneControlMainWindow(QMainWindow):
         # Could update UI with video stream info
         pass
     
+    def update_status(self):
+        """Update status display."""
+        if self.current_view_mode == "pointcloud":
+            if self.frame_count > 0:
+                status_text = f"LIVE - Point Cloud: {self.fps:.1f} FPS"
+            else:
+                status_text = "Waiting for point cloud data..."
+        else:
+            video_info = self.video_stream.get_video_info()
+            if video_info['connected']:
+                status_text = f"LIVE - Video: {video_info['fps']:.1f} FPS"
+            else:
+                status_text = "Waiting for video stream..."
+        
+        # Update command control status
+        self.ui.CommandControl.setText("Active" if self.frame_count > 0 else "Idle")
+    
+    # Connection status methods
     def update_tcp_status(self, connected, message):
         """Update TCP connection status."""
         if connected:
@@ -455,190 +423,37 @@ class DroneControlMainWindow(QMainWindow):
             self.ui.CommandConnect.setText("CONNECT")
             self.ui.CommandMode.setText("Disconnected")
     
-    def on_drone_data_received(self, record):
-        """Callback function untuk data yang diterima dari DroneParser asli."""
-        try:
-            # Extract data dari record (format dari DroneParser asli)
-            if not record or 'data' not in record:
-                return
-                
-            # Update drone status widget jika sudah disetup
-            if hasattr(self, 'drone_status') and self.drone_status:
-                self.process_drone_telemetry(record)
-                
-            # Update point cloud widget dengan drone position untuk visualization
-            if self.current_view_mode == "pointcloud":
-                position = self.drone_parser.get_position(record)
-                rpy = self.drone_parser.get_rpy(record)
-                
-                if position and rpy:
-                    self.main_point_cloud.update_drone_data(
-                        position['x'], position['y'], rpy['yaw']
-                    )
-                    
-        except Exception as e:
-            print(f"Error processing drone data: {e}")
-    
-    def process_drone_telemetry(self, record):
-        """Process telemetry data dari DroneParser asli untuk drone status widget."""
-        try:
-            # Get parsed data dari DroneParser asli
-            position = self.drone_parser.get_position(record)
-            rpy = self.drone_parser.get_rpy(record)
-            battery = self.drone_parser.get_battery(record)
-            
-            # Update drone status widget
-            if position:
-                self.drone_status.update_position(
-                    x=position['x'], 
-                    y=position['y'], 
-                    z=position['z']
-                )
-                
-            if rpy:
-                self.drone_status.update_attitude(
-                    roll=rpy['roll'],
-                    pitch=rpy['pitch'], 
-                    yaw=rpy['yaw']
-                )
-                
-            if battery:
-                self.drone_status.update_battery(
-                    percentage=int(battery['percentage'])
-                )
-                
-            # Additional status dari raw data (format JSON dari DroneParser asli)
-            raw_data = record['data']
-            if 'armed' in raw_data:
-                self.drone_status.update_flight_status(
-                    armed=raw_data['armed']
-                )
-                
-            # Update connection status
-            self.drone_status.set_connection_status(True)
-            
-        except Exception as e:
-            print(f"Error processing telemetry: {e}")
-    
-    def update_drone_data(self):
-        """Update drone data display - Using original DroneParser."""
-        if not self.drone_parser:
+    # Waypoint and marker management
+    def toggle_edit_mode(self, state):
+        """Toggle edit mode for waypoint management."""
+        if self.current_view_mode != "pointcloud":
+            self.ui.mcEditMode.setChecked(False)
             return
             
-        try:
-            # Get latest data dari DroneParser asli
-            latest_data = self.drone_parser.get_latest()
-            if not latest_data:
-                return
-                
-            # Get parsed data using original methods
-            position = self.drone_parser.get_position(latest_data)
-            rpy = self.drone_parser.get_rpy(latest_data)  
-            battery = self.drone_parser.get_battery(latest_data)
-            
-            # Update UI labels directly
-            if position:
-                self.ui.DronePositionX.setText(f"[{position['x']:.2f}] m")
-                self.ui.DronePositionY.setText(f"[{position['y']:.2f}] m") 
-                self.ui.DroneHeight.setText(f"{position['z']:.2f} meter")
-                
-                # Update point cloud widget dengan drone position
-                if rpy and self.current_view_mode == "pointcloud":
-                    self.main_point_cloud.update_drone_data(
-                        position['x'], position['y'], rpy['yaw']
-                    )
-            
-            if battery:
-                percentage = int(battery['percentage'])
-                self.ui.DroneBattery.setValue(percentage)
-                
-                # Update battery color berdasarkan level
-                if percentage < 20:
-                    color = "#e63946"  # Red
-                elif percentage < 50:
-                    color = "#f77f00"  # Orange
-                else:
-                    color = "#3ddb55"  # Green
-                    
-                self.ui.DroneBattery.setStyleSheet(f"""
-                    QProgressBar::chunk {{ background-color: {color}; }}
-                """)
-            
-            # Update status from raw JSON data
-            raw_data = latest_data.get('data', {})
-            if 'armed' in raw_data:
-                mode_text = "ARMED" if raw_data['armed'] else "DISARMED"
-                self.ui.DroneMode.setText(mode_text)
-                
-                # Color coding berdasarkan armed status
-                if raw_data['armed']:
-                    self.ui.DroneMode.setStyleSheet("color: #e63946;")  # Red untuk armed
-                else:
-                    self.ui.DroneMode.setStyleSheet("color: #3ddb55;")  # Green untuk disarmed
-            
-            # Update drone status widget jika sudah disetup
-            if hasattr(self, 'drone_status') and self.drone_status:
-                self.update_drone_status_widget_original(position, rpy, battery, raw_data)
-                    
-        except Exception as e:
-            # Silently handle errors, but log for debugging
-            pass
-    
-    def update_drone_status_widget_original(self, position, rpy, battery, raw_data):
-        """Update drone status widget dengan data dari DroneParser asli."""
-        try:
-            if position:
-                self.drone_status.update_position(
-                    x=position['x'], 
-                    y=position['y'], 
-                    z=position['z']
-                )
-                
-            if rpy:
-                self.drone_status.update_attitude(
-                    roll=rpy['roll'],
-                    pitch=rpy['pitch'], 
-                    yaw=rpy['yaw']
-                )
-                
-            if battery:
-                self.drone_status.update_battery(
-                    percentage=int(battery['percentage']),
-                    voltage=battery.get('voltage', 0.0)
-                )
-            
-            # Status dari raw JSON data
-            if 'armed' in raw_data:
-                self.drone_status.update_flight_status(
-                    armed=raw_data['armed']
-                )
-                
-            # Update connection status
-            self.drone_status.set_connection_status(True)
-            
-        except Exception as e:
-            print(f"Error updating drone status widget: {e}")
-    
-    def update_status(self):
-        """Update status display."""
-        if self.current_view_mode == "pointcloud":
-            if self.frame_count > 0:
-                status_text = f"LIVE - Point Cloud: {self.fps:.1f} FPS"
-            else:
-                status_text = "Waiting for point cloud data..."
-        else:
-            video_info = self.video_stream.get_video_info()
-            if video_info['connected']:
-                status_text = f"LIVE - Video: {video_info['fps']:.1f} FPS"
-            else:
-                status_text = "Waiting for video stream..."
+        self.edit_mode = state == Qt.Checked
+        self.main_point_cloud.set_edit_mode(self.edit_mode)
         
-        # Update command control status
-        self.ui.CommandControl.setText("Active" if self.frame_count > 0 else "Idle")
+        if self.edit_mode:
+            self.update_waypoints_table()
+            self.log_debug("Edit mode enabled")
+        else:
+            self.log_debug("Edit mode disabled")
+    
+    def update_view_controls(self, state):
+        """Update view controls."""
+        if self.current_view_mode == "pointcloud":
+            top_down_enabled = state == Qt.Checked
+            self.main_point_cloud.set_top_down_mode(top_down_enabled)
+            self.log_debug(f"Top-down view: {'Locked' if top_down_enabled else 'Unlocked'}")
+    
+    def update_height_filter(self, value):
+        """Update height filtering."""
+        if self.current_view_mode == "pointcloud":
+            self.main_point_cloud.set_z_filter(max_z=value, enabled=True)
+            self.log_debug(f"Height filter: {value:.1f}m")
     
     def update_waypoints_table(self):
         """Update waypoints display table."""
-        # Only update jika dalam point cloud mode
         if self.current_view_mode != "pointcloud":
             return
             
@@ -648,12 +463,10 @@ class DroneControlMainWindow(QMainWindow):
         for i, waypoint in enumerate(waypoints):
             pos_x, pos_y = waypoint['position']
             
-            # Position
             from PyQt5.QtWidgets import QTableWidgetItem, QPushButton, QCheckBox
             self.ui.mcDisplayData.setItem(i, 0, 
                 QTableWidgetItem(f"({pos_x:.2f}, {pos_y:.2f})"))
             
-            # Orientation
             self.ui.mcDisplayData.setItem(i, 1, 
                 QTableWidgetItem(f"{waypoint['orientation']:.3f}"))
             
@@ -685,7 +498,6 @@ class DroneControlMainWindow(QMainWindow):
     
     def update_marker_display(self):
         """Update marker display untuk single command mode."""
-        # Only update jika dalam point cloud mode
         if self.current_view_mode != "pointcloud":
             # Clear display and disable controls
             self.ui.scPositionX.setText("0.00")
@@ -702,15 +514,11 @@ class DroneControlMainWindow(QMainWindow):
         marker = self.main_point_cloud.get_marker()
         
         if marker:
-            # Update position display
             x, y = marker['position']
             self.ui.scPositionX.setText(f"{x:.2f}")
             self.ui.scPositionY.setText(f"{y:.2f}")
-            
-            # Update orientation
             self.ui.scOrientation.setText(f"{marker['orientation']:.4f} rad")
             
-            # Update checkboxes
             self.ui.scYawEnable.blockSignals(True)
             self.ui.scYawEnable.setChecked(marker['yaw_enable'])
             self.ui.scYawEnable.blockSignals(False)
@@ -746,6 +554,7 @@ class DroneControlMainWindow(QMainWindow):
             
             self.current_marker = None
     
+    # Marker and waypoint actions
     def edit_marker_orientation(self):
         """Edit marker orientation menggunakan joystick dialog."""
         if self.current_marker and self.current_view_mode == "pointcloud":
@@ -825,8 +634,6 @@ class DroneControlMainWindow(QMainWindow):
             waypoints = self.main_point_cloud.get_waypoints()
             pos = waypoints[index]['position']
             self.log_debug(f"Waypoint {index + 1} added: ({pos[0]:.2f}, {pos[1]:.2f})")
-            
-            # Send updated waypoints ke server
             self.send_waypoints_to_server()
     
     def delete_waypoint(self, index):
@@ -834,8 +641,6 @@ class DroneControlMainWindow(QMainWindow):
         if self.current_view_mode == "pointcloud":
             self.main_point_cloud.delete_waypoint(index)
             self.log_debug(f"Waypoint {index + 1} deleted")
-            
-            # Send updated waypoints ke server
             self.send_waypoints_to_server()
     
     def send_multiple_commands(self):
@@ -845,7 +650,6 @@ class DroneControlMainWindow(QMainWindow):
             return
         
         try:
-            # First, send all waypoints to server
             waypoints = self.main_point_cloud.get_waypoints()
             added_waypoints = [wp for wp in waypoints if wp.get('added', False)]
             
@@ -860,20 +664,14 @@ class DroneControlMainWindow(QMainWindow):
                 waypoint_str = f"[{pos_x:.2f},{pos_y:.2f},{wp['orientation']:.3f},{int(wp['yaw_enable'])},{int(wp['landing'])}]"
                 waypoints_strings.append(waypoint_str)
             
-            # Join all waypoints sebagai single string
             waypoints_data_str = ",".join(waypoints_strings)
-            
-            # Send waypoints command as string
             waypoints_command = f"waypoints {waypoints_data_str}"
             waypoints_success = self.send_websocket_command(waypoints_command)
             
             if waypoints_success:
-                self.log_debug(f"Sent {len(waypoints_strings)} waypoints to server as string")
+                self.log_debug(f"Sent {len(waypoints_strings)} waypoints to server")
                 
-                # Wait a moment, then send start command
-                import time
                 time.sleep(0.1)  # Short delay
-                
                 start_success = self.send_websocket_command("start")
                 if start_success:
                     self.log_debug("Mission started")
@@ -887,31 +685,26 @@ class DroneControlMainWindow(QMainWindow):
             print(f"Error sending multiple commands: {e}")
     
     def send_waypoints_to_server(self):
-        """Send all added waypoints ke WebSocket server as string."""
+        """Send all added waypoints ke WebSocket server."""
         try:
             waypoints = self.main_point_cloud.get_waypoints()
             added_waypoints = [wp for wp in waypoints if wp.get('added', False)]
             
             if len(added_waypoints) == 0:
-                self.log_debug("No waypoints to send")
                 return False
             
-            # Format waypoints sebagai string
             waypoints_strings = []
             for wp in added_waypoints:
                 pos_x, pos_y = wp['position']
                 waypoint_str = f"[{pos_x:.2f},{pos_y:.2f},{wp['orientation']:.3f},{int(wp['yaw_enable'])},{int(wp['landing'])}]"
                 waypoints_strings.append(waypoint_str)
             
-            # Join all waypoints sebagai single string
             waypoints_data_str = ",".join(waypoints_strings)
-            
-            # Send command dengan waypoints data as string
-            waypoints_command = f"waypoints {waypoints_data_str}"
+            waypoints_command = f"coordinates [{waypoints_data_str}]"
             success = self.send_websocket_command(waypoints_command)
             
             if success:
-                self.log_debug(f"Sent {len(waypoints_strings)} waypoints to server as string")
+                self.log_debug(f"Sent {len(waypoints_strings)} waypoints to server")
                 return True
             else:
                 self.log_debug(f"Failed to send waypoints to server")
@@ -919,7 +712,6 @@ class DroneControlMainWindow(QMainWindow):
                 
         except Exception as e:
             self.log_debug(f"Error sending waypoints: {e}")
-            print(f"Error sending waypoints to server: {e}")
             return False
     
     def save_current_frame(self):
@@ -940,7 +732,6 @@ class DroneControlMainWindow(QMainWindow):
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(raw_points)
         
-        # Generate colors
         raw_heights = raw_points[:, 2]
         raw_colors = self.main_point_cloud.generate_colors(raw_heights)
         if len(raw_colors) > 0:
@@ -949,22 +740,20 @@ class DroneControlMainWindow(QMainWindow):
         o3d.io.write_point_cloud(filename, pcd)
         self.log_debug(f"Saved: {filename} ({len(raw_points)} points)")
     
+    # Utility methods
     def on_orientation_dial_changed(self, value):
         """Handle orientation dial change."""
-        # Convert dial value (0-99) ke radians (-π to π)
         import math
         orientation = (value / 50.0 - 1.0) * math.pi
         self.ui.mcOrientation.setText(f"{orientation:.4f} rad")
     
     def update_altitude_display(self, value):
         """Update altitude display."""
-        # Update altitude meter display
         # This could be connected to drone altitude control
         pass
     
     def log_debug(self, message):
         """Log message ke debugging console."""
-        import time
         timestamp = time.strftime("%H:%M:%S")
         formatted_message = f"[{timestamp}] {message}"
         
@@ -980,8 +769,12 @@ class DroneControlMainWindow(QMainWindow):
             cursor.deleteChar()
     
     def closeEvent(self, event):
-        """Clean shutdown."""
+        """Clean shutdown with telemetry handler cleanup."""
         print("Shutting down Drone Control Center...")
+        
+        # Cleanup telemetry handler
+        if hasattr(self, 'telemetry_handler') and self.telemetry_handler:
+            self.telemetry_handler.cleanup()
         
         # Stop video stream
         if hasattr(self, 'video_stream') and hasattr(self.video_stream, 'stop_stream'):
@@ -1001,20 +794,11 @@ class DroneControlMainWindow(QMainWindow):
             self.websocket_thread.quit()
             self.websocket_thread.wait()
         
-        # Stop original DroneParser dengan scapy
+        # Stop drone parser
         if hasattr(self, 'drone_parser') and self.drone_parser:
             try:
                 print("Stopping drone parser...")
                 self.drone_parser.stop()
-                
-                # Save captured data jika ada (original DroneParser method)
-                if len(self.drone_parser) > 0:
-                    filename = f"drone_telemetry_{int(time.time())}.json"
-                    saved_file = self.drone_parser.save_data(filename)
-                    print(f"Saved {len(self.drone_parser)} telemetry records to {saved_file}")
-                else:
-                    print("No telemetry data to save")
-                    
             except Exception as e:
                 print(f"Error stopping drone parser: {e}")
         

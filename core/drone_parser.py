@@ -1,448 +1,316 @@
 """
-Drone Data Parser
-Handles incoming drone telemetry data and provides structured access
+DroneParser - Simple UDP Drone Telemetry Parser Library
+
+AVAILABLE METHODS:
+    # Setup & Control
+    parser = DroneParser(port=8889, max_records=1000)  # Create parser
+    parser.start(callback=None)                        # Start capturing data
+    parser.stop()                                      # Stop capturing
+    parser.clear_data()                                # Clear stored data
+    
+    # Get Data
+    parser.get_latest()                                # Get newest packet
+    parser.get_all_data()                              # Get all packets
+    parser.get_telemetry_data()                        # Get only flight data packets
+    
+    # Extract Specific Info (pass record or None for latest)
+    parser.get_rpy(record=None)                        # Get roll/pitch/yaw data
+    parser.get_position(record=None)                   # Get lat/lon/altitude
+    parser.get_battery(record=None)                    # Get battery info
+    
+    # File Operations
+    parser.save_data(filename=None)                    # Save to JSON file
+    len(parser)                                        # Number of packets captured
+
+BASIC USAGE:
+    # Simple capture
+    parser = DroneParser()
+    parser.start()
+    
+    # Get latest data
+    latest = parser.get_latest()
+    rpy = parser.get_rpy()         # Roll/pitch/yaw in rad & degrees
+    pos = parser.get_position()    # XYZ position + altitude
+    bat = parser.get_battery()     # Battery % and voltage
+    
+    # Live monitoring with callback
+    def on_data(record):
+        rpy = parser.get_rpy(record)
+        print(f"Yaw: {rpy['yaw_deg']:.1f}°")
+    
+    parser.start(callback=on_data)
+    
+    # Save and stop
+    parser.save_data("flight.json")
+    parser.stop()
+
+Requirements: pip install scapy
 """
 
-import socket
-import struct
-import threading
+import json
 import time
-from typing import Dict, Optional, Tuple, Any
-from collections import deque
-from dataclasses import dataclass
-from config.settings import NETWORK_CONFIG
+import threading
+from scapy.all import sniff, UDP, IP
+from datetime import datetime
+from typing import Callable, Optional, Dict, Any, List
 
-
-@dataclass
-class DronePosition:
-    """Drone position data structure."""
-    x: float = 0.0
-    y: float = 0.0
-    z: float = 0.0
-    timestamp: float = 0.0
-
-
-@dataclass
-class DroneOrientation:
-    """Drone orientation data structure."""
-    roll: float = 0.0
-    pitch: float = 0.0
-    yaw: float = 0.0
-    timestamp: float = 0.0
-
-
-@dataclass
-class DroneVelocity:
-    """Drone velocity data structure."""
-    vx: float = 0.0
-    vy: float = 0.0
-    vz: float = 0.0
-    timestamp: float = 0.0
-
-
-@dataclass
-class DroneBattery:
-    """Drone battery data structure."""
-    voltage: float = 0.0
-    percentage: int = 0
-    current: float = 0.0
-    timestamp: float = 0.0
-
-
-@dataclass
-class DroneStatus:
-    """Drone status data structure."""
-    armed: bool = False
-    mode: str = "UNKNOWN"
-    connected: bool = False
-    flight_time: int = 0  # seconds
-    timestamp: float = 0.0
-
-
-class DroneDataParser:
-    """Parser for drone telemetry data with multiple protocol support."""
-    
-    def __init__(self, port: int = 8889, buffer_size: int = 100):
-        self.port = port
-        self.buffer_size = buffer_size
-        self.running = False
-        self.connected = False
-        
-        # Data storage with circular buffers
-        self.position_buffer = deque(maxlen=buffer_size)
-        self.orientation_buffer = deque(maxlen=buffer_size)
-        self.velocity_buffer = deque(buffer_size)
-        self.battery_buffer = deque(maxlen=buffer_size)
-        self.status_buffer = deque(maxlen=buffer_size)
-        
-        # Latest data cache
-        self.latest_position = DronePosition()
-        self.latest_orientation = DroneOrientation()
-        self.latest_velocity = DroneVelocity()
-        self.latest_battery = DroneBattery()
-        self.latest_status = DroneStatus()
-        
-        # Network components
-        self.socket = None
-        self.thread = None
-        self.lock = threading.Lock()
-        
-        # Statistics
-        self.packets_received = 0
-        self.packets_parsed = 0
-        self.parse_errors = 0
-        self.last_update_time = 0.0
-    
-    def start(self):
-        """Start the drone data parser."""
-        if self.running:
-            print("Drone parser already running")
-            return
-        
-        self.running = True
-        self.thread = threading.Thread(target=self._run_parser, daemon=True)
-        self.thread.start()
-        print(f"Drone parser started on port {self.port}")
-    
-    def stop(self):
-        """Stop the drone data parser."""
-        self.running = False
-        if self.socket:
-            self.socket.close()
-        if self.thread:
-            self.thread.join(timeout=2.0)
-        print("Drone parser stopped")
-    
-    def _run_parser(self):
-        """Main parser loop."""
-        try:
-            self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self.socket.bind(('', self.port))
-            self.socket.settimeout(1.0)
-            
-            print(f"Listening for drone data on port {self.port}")
-            
-            while self.running:
-                try:
-                    data, addr = self.socket.recvfrom(1024)
-                    self.packets_received += 1
-                    
-                    if not self.connected:
-                        self.connected = True
-                        print(f"Drone connected from {addr}")
-                    
-                    self._parse_data(data)
-                    self.last_update_time = time.time()
-                    
-                except socket.timeout:
-                    # Check if we lost connection
-                    if self.connected and time.time() - self.last_update_time > 5.0:
-                        self.connected = False
-                        print("Drone connection lost")
-                    continue
-                except Exception as e:
-                    print(f"Error receiving drone data: {e}")
-                    self.parse_errors += 1
-                    
-        except Exception as e:
-            print(f"Error starting drone parser: {e}")
-        finally:
-            if self.socket:
-                self.socket.close()
-            self.connected = False
-    
-    def _parse_data(self, data: bytes):
-        """Parse incoming drone data."""
-        try:
-            if len(data) < 4:
-                return
-            
-            # Parse message type (first 4 bytes)
-            msg_type = struct.unpack('<I', data[:4])[0]
-            payload = data[4:]
-            
-            if msg_type == 1:  # Position data
-                self._parse_position(payload)
-            elif msg_type == 2:  # Orientation data
-                self._parse_orientation(payload)
-            elif msg_type == 3:  # Velocity data
-                self._parse_velocity(payload)
-            elif msg_type == 4:  # Battery data
-                self._parse_battery(payload)
-            elif msg_type == 5:  # Status data
-                self._parse_status(payload)
-            elif msg_type == 0:  # Combined telemetry
-                self._parse_combined_telemetry(payload)
-            else:
-                print(f"Unknown message type: {msg_type}")
-                return
-            
-            self.packets_parsed += 1
-            
-        except Exception as e:
-            print(f"Error parsing drone data: {e}")
-            self.parse_errors += 1
-    
-    def _parse_position(self, payload: bytes):
-        """Parse position data."""
-        if len(payload) < 12:  # 3 floats
-            return
-        
-        x, y, z = struct.unpack('<fff', payload[:12])
-        
-        with self.lock:
-            position = DronePosition(x, y, z, time.time())
-            self.latest_position = position
-            self.position_buffer.append(position)
-    
-    def _parse_orientation(self, payload: bytes):
-        """Parse orientation data (roll, pitch, yaw)."""
-        if len(payload) < 12:  # 3 floats
-            return
-        
-        roll, pitch, yaw = struct.unpack('<fff', payload[:12])
-        
-        with self.lock:
-            orientation = DroneOrientation(roll, pitch, yaw, time.time())
-            self.latest_orientation = orientation
-            self.orientation_buffer.append(orientation)
-    
-    def _parse_velocity(self, payload: bytes):
-        """Parse velocity data."""
-        if len(payload) < 12:  # 3 floats
-            return
-        
-        vx, vy, vz = struct.unpack('<fff', payload[:12])
-        
-        with self.lock:
-            velocity = DroneVelocity(vx, vy, vz, time.time())
-            self.latest_velocity = velocity
-            self.velocity_buffer.append(velocity)
-    
-    def _parse_battery(self, payload: bytes):
-        """Parse battery data."""
-        if len(payload) < 12:  # float + int + float
-            return
-        
-        voltage, percentage, current = struct.unpack('<fIf', payload[:12])
-        
-        with self.lock:
-            battery = DroneBattery(voltage, percentage, current, time.time())
-            self.latest_battery = battery
-            self.battery_buffer.append(battery)
-    
-    def _parse_status(self, payload: bytes):
-        """Parse status data."""
-        if len(payload) < 20:
-            return
-        
-        armed, mode_len = struct.unpack('<BI', payload[:5])
-        
-        if len(payload) < 5 + mode_len + 4:
-            return
-        
-        mode = payload[5:5+mode_len].decode('utf-8', errors='ignore')
-        flight_time = struct.unpack('<I', payload[5+mode_len:9+mode_len])[0]
-        
-        with self.lock:
-            status = DroneStatus(
-                armed=bool(armed),
-                mode=mode,
-                connected=self.connected,
-                flight_time=flight_time,
-                timestamp=time.time()
-            )
-            self.latest_status = status
-            self.status_buffer.append(status)
-    
-    def _parse_combined_telemetry(self, payload: bytes):
-        """Parse combined telemetry data."""
-        if len(payload) < 48:  # Minimum for combined data
-            return
-        
-        try:
-            # Position (12 bytes)
-            x, y, z = struct.unpack('<fff', payload[:12])
-            
-            # Orientation (12 bytes)
-            roll, pitch, yaw = struct.unpack('<fff', payload[12:24])
-            
-            # Velocity (12 bytes)
-            vx, vy, vz = struct.unpack('<fff', payload[24:36])
-            
-            # Battery (12 bytes)
-            voltage, percentage, current = struct.unpack('<fIf', payload[36:48])
-            
-            timestamp = time.time()
-            
-            with self.lock:
-                # Update all data structures
-                self.latest_position = DronePosition(x, y, z, timestamp)
-                self.latest_orientation = DroneOrientation(roll, pitch, yaw, timestamp)
-                self.latest_velocity = DroneVelocity(vx, vy, vz, timestamp)
-                self.latest_battery = DroneBattery(voltage, percentage, current, timestamp)
-                
-                # Add to buffers
-                self.position_buffer.append(self.latest_position)
-                self.orientation_buffer.append(self.latest_orientation)
-                self.velocity_buffer.append(self.latest_velocity)
-                self.battery_buffer.append(self.latest_battery)
-                
-        except Exception as e:
-            print(f"Error parsing combined telemetry: {e}")
-    
-    def get_latest_position(self) -> Optional[DronePosition]:
-        """Get the latest position data."""
-        with self.lock:
-            if self.position_buffer:
-                return self.latest_position
-        return None
-    
-    def get_latest_orientation(self) -> Optional[DroneOrientation]:
-        """Get the latest orientation data."""
-        with self.lock:
-            if self.orientation_buffer:
-                return self.latest_orientation
-        return None
-    
-    def get_latest_velocity(self) -> Optional[DroneVelocity]:
-        """Get the latest velocity data."""
-        with self.lock:
-            if self.velocity_buffer:
-                return self.latest_velocity
-        return None
-    
-    def get_latest_battery(self) -> Optional[DroneBattery]:
-        """Get the latest battery data."""
-        with self.lock:
-            if self.battery_buffer:
-                return self.latest_battery
-        return None
-    
-    def get_latest_status(self) -> Optional[DroneStatus]:
-        """Get the latest status data."""
-        with self.lock:
-            if self.status_buffer:
-                return self.latest_status
-        return None
-    
-    def get_position_history(self, count: int = 10) -> list:
-        """Get recent position history."""
-        with self.lock:
-            return list(self.position_buffer)[-count:]
-    
-    def get_orientation_history(self, count: int = 10) -> list:
-        """Get recent orientation history."""
-        with self.lock:
-            return list(self.orientation_buffer)[-count:]
-    
-    def get_statistics(self) -> Dict[str, Any]:
-        """Get parser statistics."""
-        return {
-            'connected': self.connected,
-            'packets_received': self.packets_received,
-            'packets_parsed': self.packets_parsed,
-            'parse_errors': self.parse_errors,
-            'success_rate': (self.packets_parsed / max(1, self.packets_received)) * 100,
-            'last_update': self.last_update_time,
-            'position_buffer_size': len(self.position_buffer),
-            'orientation_buffer_size': len(self.orientation_buffer),
-            'velocity_buffer_size': len(self.velocity_buffer),
-            'battery_buffer_size': len(self.battery_buffer),
-            'status_buffer_size': len(self.status_buffer)
-        }
-    
-    def is_connected(self) -> bool:
-        """Check if drone is connected."""
-        return self.connected and (time.time() - self.last_update_time) < 5.0
-
-
-# Legacy compatibility class (for backward compatibility with existing code)
 class DroneParser:
-    """Legacy drone parser for backward compatibility."""
+    def __init__(self, port: int = 8889, max_records: int = 1000):
+        self.port = port
+        self.max_records = max_records
+        self.data = []
+        self.is_running = False
+        self.sniff_thread = None
+        self.callback = None
     
-    def __init__(self, port: int = 8889):
-        self.parser = DroneDataParser(port)
-        self._latest_data = {}
+    def _extract_json(self, data_bytes: bytes) -> Optional[str]:
+        """Extract JSON from UDP packet data"""
+        try:
+            data_str = data_bytes.decode('utf-8', errors='ignore')
+            start = data_str.find('{')
+            if start == -1:
+                return None
+            
+            brace_count = 0
+            for i, char in enumerate(data_str[start:], start):
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        return data_str[start:i+1]
+            return None
+        except:
+            return None
     
-    def start(self):
-        """Start the parser."""
-        self.parser.start()
+    def _handle_packet(self, packet):
+        """Internal packet handler"""
+        if UDP in packet and packet[UDP].dport == self.port:
+            data_bytes = bytes(packet[UDP].payload)
+            json_str = self._extract_json(data_bytes)
+            
+            if json_str:
+                try:
+                    json_data = json.loads(json_str)
+                    
+                    # Create record
+                    record = {
+                        'timestamp': datetime.now(),
+                        'source_ip': packet[IP].src,
+                        'source_port': packet[UDP].sport,
+                        'data': json_data
+                    }
+                    
+                    # Add to data list
+                    self.data.append(record)
+                    if len(self.data) > self.max_records:
+                        self.data.pop(0)
+                    
+                    # Call callback if set
+                    if self.callback:
+                        self.callback(record)
+                        
+                except json.JSONDecodeError:
+                    pass
     
-    def stop(self):
-        """Stop the parser."""
-        self.parser.stop()
+    def start(self, callback: Optional[Callable] = None) -> None:
+        """Start capturing data"""
+        if self.is_running:
+            return
+        
+        self.callback = callback
+        self.is_running = True
+        
+        def sniff_worker():
+            sniff(filter=f"udp port {self.port}", prn=self._handle_packet, stop_filter=lambda x: not self.is_running)
+        
+        self.sniff_thread = threading.Thread(target=sniff_worker, daemon=True)
+        self.sniff_thread.start()
     
-    def get_latest(self) -> Optional[Dict]:
-        """Get latest data in legacy format."""
-        if not self.parser.is_connected():
+    def stop(self) -> None:
+        """Stop capturing data"""
+        self.is_running = False
+        if self.sniff_thread:
+            self.sniff_thread.join(timeout=2)
+    
+    def get_latest(self) -> Optional[Dict[str, Any]]:
+        """Get the latest record"""
+        return self.data[-1] if self.data else None
+    
+    def get_all_data(self) -> List[Dict[str, Any]]:
+        """Get all captured data"""
+        return self.data.copy()
+    
+    def get_telemetry_data(self) -> List[Dict[str, Any]]:
+        """Get only telemetry records"""
+        return [r for r in self.data if 'altitude' in r['data']]
+    
+    def get_rpy(self, record: Optional[Dict] = None) -> Optional[Dict[str, float]]:
+        """Extract RPY data from a record"""
+        if record is None:
+            record = self.get_latest()
+        
+        if not record or 'attitude' not in record['data']:
             return None
         
-        # Combine all latest data into legacy format
-        position = self.parser.get_latest_position()
-        orientation = self.parser.get_latest_orientation()
-        velocity = self.parser.get_latest_velocity()
-        battery = self.parser.get_latest_battery()
-        status = self.parser.get_latest_status()
-        
-        if not all([position, orientation]):
+        attitude = record['data']['attitude']
+        if len(attitude) < 3:
             return None
         
         return {
-            'position': {
-                'x': position.x,
-                'y': position.y,
-                'z': position.z
-            },
-            'orientation': {
-                'roll': orientation.roll,
-                'pitch': orientation.pitch,
-                'yaw': orientation.yaw
-            },
-            'velocity': {
-                'vx': velocity.vx if velocity else 0.0,
-                'vy': velocity.vy if velocity else 0.0,
-                'vz': velocity.vz if velocity else 0.0
-            },
-            'battery': {
-                'voltage': battery.voltage if battery else 0.0,
-                'percentage': battery.percentage if battery else 0,
-                'current': battery.current if battery else 0.0
-            },
-            'status': {
-                'armed': status.armed if status else False,
-                'mode': status.mode if status else "UNKNOWN",
-                'flight_time': status.flight_time if status else 0
-            },
-            'timestamp': time.time()
+            'roll': attitude[0],
+            'pitch': attitude[1], 
+            'yaw': attitude[2],
+            'roll_deg': attitude[0] * 57.2958,
+            'pitch_deg': attitude[1] * 57.2958,
+            'yaw_deg': attitude[2] * 57.2958
         }
     
-    def get_position(self, data: Optional[Dict]) -> Optional[Dict]:
-        """Get position from data in legacy format."""
-        if data and 'position' in data:
-            return data['position']
-        return None
+    def get_velocity(self, record: Optional[Dict] = None) -> Optional[Dict[str, float]]:
+        """Extract RPY data from a record"""
+        if record is None:
+            record = self.get_latest()
+        
+        if not record or 'velocity' not in record['data']:
+            return None
+        
+        velocity = record['data']['velocity']
+        if len(velocity) < 3:
+            return None
+        
+        return {
+            'xspeed': velocity[0],
+            'yspeed': velocity[1], 
+            'zspeed': velocity[2],
+        }
     
-    def get_rpy(self, data: Optional[Dict]) -> Optional[Dict]:
-        """Get roll, pitch, yaw from data in legacy format."""
-        if data and 'orientation' in data:
-            return data['orientation']
-        return None
+    def get_position(self, record: Optional[Dict] = None) -> Optional[Dict[str, float]]:
+        """Extract position data from a record"""
+        if record is None:
+            record = self.get_latest()
+        
+        if not record or 'position' not in record['data']:
+            return None
+        
+        position = record['data']['position']
+        if len(position) < 3:
+            return None
+        return {
+            'x': position[0],
+            'y': position[1], 
+            'z': position[2],
+        }
     
-    def get_velocity(self, data: Optional[Dict]) -> Optional[Dict]:
-        """Get velocity from data in legacy format."""
-        if data and 'velocity' in data:
-            return data['velocity']
-        return None
+    def get_battery(self, record: Optional[Dict] = None) -> Optional[Dict[str, float]]:
+        """Extract battery data from a record"""
+        if record is None:
+            record = self.get_latest()
+        
+        if not record:
+            return None
+        
+        data = record['data']
+        return {
+            'percentage': data.get('battery_percetage', 0) * 100,
+            'voltage': data.get('battery_state')
+        }
     
-    def get_battery(self, data: Optional[Dict]) -> Optional[Dict]:
-        """Get battery from data in legacy format."""
-        if data and 'battery' in data:
-            return data['battery']
-        return None
+    def get_mode(self, record: Optional[Dict] = None) -> Optional[Dict[str, float]]:
+        """Extract mode data from a record"""
+        if record is None:
+            record = self.get_latest()
+        
+        if not record:
+            return None
+        
+        data = record['data']
+        return {
+            'mode': data.get('mode')
+        }
     
-    def get_status(self, data: Optional[Dict]) -> Optional[Dict]:
-        """Get status from data in legacy format."""
-        if data and 'status' in data:
-            return data['status']
-        return None
+    def get_armed(self, record: Optional[Dict] = None) -> Optional[Dict[str, float]]:
+        """Extract arm data from a record"""
+        if record is None:
+            record = self.get_latest()
+        
+        if not record:
+            return None
+        
+        data = record['data']
+        return {
+            'armed': data.get('armed')
+        }
+    
+    def save_data(self, filename: Optional[str] = None) -> str:
+        """Save all data to JSON file"""
+        if filename is None:
+            filename = f"drone_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        
+        # Convert datetime objects to strings for JSON serialization
+        data_copy = []
+        for record in self.data:
+            record_copy = record.copy()
+            record_copy['timestamp'] = record['timestamp'].isoformat()
+            data_copy.append(record_copy)
+        
+        with open(filename, 'w') as f:
+            json.dump(data_copy, f, indent=2)
+        
+        return filename
+    
+    def clear_data(self) -> None:
+        """Clear all stored data"""
+        self.data.clear()
+    
+    def __len__(self) -> int:
+        """Return number of records"""
+        return len(self.data)
+
+# Example usage functions
+def print_data(record):
+    """Example callback function"""
+    data = record['data']
+    timestamp = record['timestamp'].strftime("%H:%M:%S.%f")[:-3]
+    
+    print(f"\n[{timestamp}] From {record['source_ip']}:{record['source_port']}")
+    
+    # Orientation RPY data
+    if 'attitude' in data and len(data['attitude']) >= 3:
+        roll, pitch, yaw = data['attitude'][:3]
+        print(f"🧭 Orientation RPY: R={roll:.3f}, P={pitch:.3f}, Y={yaw:.3f} (rad)")
+        print(f"    Orientation RPY: R={roll*57.3:.1f}°, P={pitch*57.3:.1f}°, Y={yaw*57.3:.1f}°")
+    
+    # Position data
+    if 'position' in data and len(data['position']) >= 3:
+        x, y, z = data['position'][:3]
+        print(f"📍 Position XYZ: X={x:.2f}m, Y={y:.2f}m, Z={z:.2f}m")
+        
+    if 'armed' in data:
+        print(f"⚡ Armed: {data['armed']}")
+
+# Simple usage example
+if __name__ == "__main__":
+    parser = DroneParser(port=8889)
+    parser.start()
+    
+    while True:
+        # Get latest data
+        latest = parser.get_latest()
+        rpy = parser.get_rpy()         # Roll/pitch/yaw in rad & degrees
+        pos = parser.get_position()    # XYZ position + altitude
+        bat = parser.get_battery()     # Battery % and voltage
+        vel = parser.get_velocity()   # Velocity in m/s
+        mode = parser.get_mode()       # Current mode
+        armed = parser.get_armed()     # Armed status
+        
+        print(rpy)
+        print(pos)
+        print(bat)
+        print(vel)
+        print(mode)
+        print(armed)
+        time.sleep(2)
+        
+        # Save and stop
+        parser.save_data("flight.json")
+        parser.stop()

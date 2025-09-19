@@ -6,7 +6,7 @@ Contains the main business logic and communication modules
 
 from .tcp_receiver import TCPDataReceiver, TCPServerThread
 from .websocket_client import WebSocketCommandClient, WebSocketCommandThread  
-from .drone_parser import DroneParser, DroneDataParser
+from .drone_parser import DroneParser
 from .waypoint_manager import WaypointManager
 
 __all__ = [
@@ -15,6 +15,6 @@ __all__ = [
     'WebSocketCommandClient', 
     'WebSocketCommandThread',
     'DroneParser',
-    'DroneDataParser',
+    # 'DroneDataParser',
     'WaypointManager'
 ]
