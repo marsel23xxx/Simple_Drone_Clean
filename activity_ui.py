@@ -449,25 +449,23 @@ class Ui_MainWindow(object):
 "border: 0px gray; ")
         self.label_27.setObjectName("label_27")
         self.DronePositionX = QtWidgets.QLabel(self.frame_12)
-        self.DronePositionX.setGeometry(QtCore.QRect(50, 60, 71, 21))
+        self.DronePositionX.setGeometry(QtCore.QRect(50, 60, 101, 21))
         font = QtGui.QFont()
         font.setPointSize(10)
-        font.setBold(True)
-        font.setWeight(75)
+        font.setBold(False)
+        font.setWeight(50)
         self.DronePositionX.setFont(font)
         self.DronePositionX.setStyleSheet("color: white;\n"
-"font-weight: bold;\n"
 "border: 0px gray; ")
         self.DronePositionX.setObjectName("DronePositionX")
         self.DronePositionY = QtWidgets.QLabel(self.frame_12)
-        self.DronePositionY.setGeometry(QtCore.QRect(50, 80, 71, 21))
+        self.DronePositionY.setGeometry(QtCore.QRect(50, 80, 101, 21))
         font = QtGui.QFont()
         font.setPointSize(10)
-        font.setBold(True)
-        font.setWeight(75)
+        font.setBold(False)
+        font.setWeight(50)
         self.DronePositionY.setFont(font)
         self.DronePositionY.setStyleSheet("color: white;\n"
-"font-weight: bold;\n"
 "border: 0px gray; ")
         self.DronePositionY.setObjectName("DronePositionY")
         self.frame_13 = QtWidgets.QFrame(self.frame_8)
@@ -490,7 +488,7 @@ class Ui_MainWindow(object):
 "border: 0px gray; ")
         self.label_19.setObjectName("label_19")
         self.DroneMode = QtWidgets.QLabel(self.frame_13)
-        self.DroneMode.setGeometry(QtCore.QRect(20, 40, 61, 21))
+        self.DroneMode.setGeometry(QtCore.QRect(20, 40, 151, 21))
         font = QtGui.QFont()
         font.setPointSize(10)
         font.setBold(True)
@@ -553,14 +551,13 @@ class Ui_MainWindow(object):
         self.frame_14.setFrameShadow(QtWidgets.QFrame.Raised)
         self.frame_14.setObjectName("frame_14")
         self.DroneSpeedX = QtWidgets.QLabel(self.frame_14)
-        self.DroneSpeedX.setGeometry(QtCore.QRect(50, 40, 71, 21))
+        self.DroneSpeedX.setGeometry(QtCore.QRect(50, 40, 101, 21))
         font = QtGui.QFont()
         font.setPointSize(10)
-        font.setBold(True)
-        font.setWeight(75)
+        font.setBold(False)
+        font.setWeight(50)
         self.DroneSpeedX.setFont(font)
         self.DroneSpeedX.setStyleSheet("color: white;\n"
-"font-weight: bold;\n"
 "border: 0px gray; ")
         self.DroneSpeedX.setObjectName("DroneSpeedX")
         self.label_31 = QtWidgets.QLabel(self.frame_14)
@@ -599,14 +596,13 @@ class Ui_MainWindow(object):
 "border: 0px gray; ")
         self.label_33.setObjectName("label_33")
         self.DroneSpeedY = QtWidgets.QLabel(self.frame_14)
-        self.DroneSpeedY.setGeometry(QtCore.QRect(50, 60, 71, 21))
+        self.DroneSpeedY.setGeometry(QtCore.QRect(50, 60, 101, 21))
         font = QtGui.QFont()
         font.setPointSize(10)
-        font.setBold(True)
-        font.setWeight(75)
+        font.setBold(False)
+        font.setWeight(50)
         self.DroneSpeedY.setFont(font)
         self.DroneSpeedY.setStyleSheet("color: white;\n"
-"font-weight: bold;\n"
 "border: 0px gray; ")
         self.DroneSpeedY.setObjectName("DroneSpeedY")
         self.label_35 = QtWidgets.QLabel(self.frame_14)
@@ -621,14 +617,13 @@ class Ui_MainWindow(object):
 "border: 0px gray; ")
         self.label_35.setObjectName("label_35")
         self.DroneSpeedZ = QtWidgets.QLabel(self.frame_14)
-        self.DroneSpeedZ.setGeometry(QtCore.QRect(50, 80, 71, 21))
+        self.DroneSpeedZ.setGeometry(QtCore.QRect(50, 80, 101, 21))
         font = QtGui.QFont()
         font.setPointSize(10)
-        font.setBold(True)
-        font.setWeight(75)
+        font.setBold(False)
+        font.setWeight(50)
         self.DroneSpeedZ.setFont(font)
         self.DroneSpeedZ.setStyleSheet("color: white;\n"
-"font-weight: bold;\n"
 "border: 0px gray; ")
         self.DroneSpeedZ.setObjectName("DroneSpeedZ")
         self.frame_15 = QtWidgets.QFrame(self.frame_8)
@@ -651,7 +646,7 @@ class Ui_MainWindow(object):
 "border: 0px gray; ")
         self.label_21.setObjectName("label_21")
         self.DroneHeight = QtWidgets.QLabel(self.frame_15)
-        self.DroneHeight.setGeometry(QtCore.QRect(20, 40, 121, 21))
+        self.DroneHeight.setGeometry(QtCore.QRect(20, 40, 141, 21))
         font = QtGui.QFont()
         font.setPointSize(10)
         font.setBold(True)
@@ -1397,26 +1392,6 @@ class Ui_MainWindow(object):
 "font-weight: bold;\n"
 "border: 0px gray; ")
         self.label_36.setObjectName("label_36")
-        self.mcDialOnline = QtWidgets.QLabel(self.frameMultipleCommand)
-        self.mcDialOnline.setGeometry(QtCore.QRect(510, 40, 10, 10))
-        font = QtGui.QFont()
-        font.setPointSize(8)
-        font.setBold(True)
-        font.setWeight(75)
-        self.mcDialOnline.setFont(font)
-        self.mcDialOnline.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-        self.mcDialOnline.setStyleSheet("QLabel {\n"
-"    background-color: rgb(0, 255, 0);\n"
-"    border: none;\n"
-"    min-width: 10px;\n"
-"    min-height: 10px;\n"
-"    max-width: 10px;   /* biar fix, tidak melebar */\n"
-"    max-height: 10px;  /* biar fix */\n"
-"    border-radius: 5px;  /* setengah dari 25px ≈ 12px */\n"
-"}\n"
-"")
-        self.mcDialOnline.setText("")
-        self.mcDialOnline.setObjectName("mcDialOnline")
         self.mcHover = QtWidgets.QPushButton(self.frameMultipleCommand)
         self.mcHover.setGeometry(QtCore.QRect(190, 70, 186, 31))
         font = QtGui.QFont()
@@ -1483,6 +1458,24 @@ class Ui_MainWindow(object):
 "}\n"
 "")
         self.mcHome.setObjectName("mcHome")
+        self.label_24 = QtWidgets.QLabel(self.frameMultipleCommand)
+        self.label_24.setGeometry(QtCore.QRect(510, 40, 10, 10))
+        font = QtGui.QFont()
+        font.setBold(True)
+        font.setWeight(75)
+        self.label_24.setFont(font)
+        self.label_24.setStyleSheet("QLabel {\n"
+"    background-color: rgb(0, 255, 0);\n"
+"    border: none;\n"
+"    min-width: 10px;\n"
+"    min-height: 10px;\n"
+"    max-width: 10px;   /* biar fix, tidak melebar */\n"
+"    max-height: 10px;  /* biar fix */\n"
+"    border-radius: 5px;  /* setengah dari 25px ≈ 12px */\n"
+"}\n"
+"")
+        self.label_24.setText("")
+        self.label_24.setObjectName("label_24")
         self.CommandControl_2 = QtWidgets.QLabel(self.frame_6)
         self.CommandControl_2.setGeometry(QtCore.QRect(20, 10, 101, 21))
         font = QtGui.QFont()
