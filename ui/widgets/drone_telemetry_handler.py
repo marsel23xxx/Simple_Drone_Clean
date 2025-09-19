@@ -71,7 +71,7 @@ class DroneTelemetryHandler(QObject):
         try:
             # Update last packet time
             self.last_udp_packet_time = time.time()
-            
+
             # Emit signal for UI thread processing
             self.telemetry_updated.emit(record)
             
@@ -98,7 +98,7 @@ class DroneTelemetryHandler(QObject):
             
             # Update visual drone orientation
             if rpy:
-                self.update_drone_visual_orientation(rpy)
+                #self.update_drone_visual_orientation(rpy)
                 self.log_orientation_data(rpy)
             
             # Update point cloud with drone position
@@ -136,16 +136,16 @@ class DroneTelemetryHandler(QObject):
             return
             
         try:
-            self.ui.DroneSpeedX.setText(f"[{velocity['xspeed']:.3f}] m/s")
-            self.ui.DroneSpeedY.setText(f"[{velocity['yspeed']:.3f}] m/s")
-            self.ui.DroneSpeedZ.setText(f"[{velocity['zspeed']:.3f}] m/s")
+            self.ui.DroneSpeedX.setText(f"[{velocity['xspeed']:.2f}] m/s")
+            self.ui.DroneSpeedY.setText(f"[{velocity['yspeed']:.2f}] m/s")
+            self.ui.DroneSpeedZ.setText(f"[{velocity['zspeed']:.2f}] m/s")
             
         except Exception as e:
             self.log_debug(f"Error updating velocity: {e}")
     
     def update_battery_display(self, battery):
         """Update battery-related UI elements."""
-        if not battery:
+        if not battery or int(battery['percentage']) == 0:
             return
             
         try:
@@ -234,7 +234,7 @@ class DroneTelemetryHandler(QObject):
             self.rotate_drone_view(self.ui.DroneTopView, yaw_deg, '_original_top_pixmap')
             
             # Update DroneBottomView with yaw rotation  
-            self.rotate_drone_view(self.ui.DroneBottomView, yaw_deg, '_original_bottom_pixmap')
+            self.rotate_drone_view(self.ui.DroneBottomView, roll_deg, '_original_bottom_pixmap')
             
             # Update DroneSideView with pitch rotation
             self.rotate_drone_view(self.ui.DroneSideView, pitch_deg, '_original_side_pixmap')
@@ -375,8 +375,9 @@ class DroneTelemetryHandler(QObject):
     def log_orientation_data(self, rpy):
         """Log orientation data for debugging."""
         try:
-            self.log_debug(f"Orientation - Roll: {rpy['roll_deg']:.1f}°, "
-                          f"Pitch: {rpy['pitch_deg']:.1f}°, Yaw: {rpy['yaw_deg']:.1f}°")
+            # print(f"Orientation - Roll: {rpy['roll_deg']:.1f}°, "
+            #               f"Pitch: {rpy['pitch_deg']:.1f}°, Yaw: {rpy['yaw_deg']:.1f}°")
+            pass
         except Exception as e:
             pass
     

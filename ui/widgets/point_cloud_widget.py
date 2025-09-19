@@ -6,7 +6,7 @@ Optimized widget for smooth point cloud display with drone visualization
 import math
 import numpy as np
 from PyQt5.QtWidgets import QWidget
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal, QRect
 from PyQt5.QtGui import QPainter, QPen, QBrush, QColor, QFont, QPixmap
 
 from config.settings import POINTCLOUD_CONFIG, UI_CONFIG, ASSET_PATHS
@@ -90,8 +90,8 @@ class SmoothPointCloudWidget(QWidget):
     def load_drone_image(self):
         """Load drone PNG image."""
         try:
-            if ASSET_PATHS['drone_top'].exists():
-                self.drone_image = QPixmap(str(ASSET_PATHS['drone_top']))
+            if ASSET_PATHS['drone_png'].exists():
+                self.drone_image = QPixmap(str(ASSET_PATHS['drone_png']))
                 if self.drone_image.isNull():
                     print("Failed to load drone image")
                     self.drone_image = None
@@ -124,17 +124,19 @@ class SmoothPointCloudWidget(QWidget):
         painter.save()
         
         try:
+            # Improve rendering quality for small images
             painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
+            
+            # Move to drone position and rotate
             painter.translate(screen_x, screen_y)
-            painter.rotate(math.degrees(self.drone_orientation))
+            painter.rotate(math.degrees(-self.drone_orientation))
             
+            # Calculate drone size with larger minimum
             drone_world_size = 0.6  # meters
-            scaled_size = int(max(12, drone_world_size * self.zoom))
+            scaled_size = int(max(12, drone_world_size * self.zoom))  # Larger minimum
             
-            drone_rect = self.rect()
-            drone_rect.setSize(self.drone_image.size().scaled(scaled_size, scaled_size, Qt.KeepAspectRatio))
-            drone_rect.moveCenter(self.rect().center())
-            
+            # Draw drone image centered
+            drone_rect = QRect(-scaled_size//2, -scaled_size//2, scaled_size, scaled_size)
             painter.drawPixmap(drone_rect, self.drone_image)
             
         finally:

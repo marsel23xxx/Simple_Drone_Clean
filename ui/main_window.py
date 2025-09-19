@@ -81,24 +81,34 @@ class DroneControlMainWindow(QMainWindow):
         try:
             print("Initializing DroneParser for UDP telemetry capture...")
             
-            drone_port = NETWORK_CONFIG.get('drone_data_port', 8889)
+            drone_port = 8889
             
             # Initialize DroneParser
             try:
                 self.drone_parser = DroneParser(port=drone_port, max_records=1000)
-            except TypeError:
-                try:
-                    self.drone_parser = DroneParser(port=drone_port)
-                except:
-                    self.drone_parser = DroneParser()
-            
-            # Create telemetry handler
-            if self.drone_parser:
                 self.telemetry_handler = DroneTelemetryHandler(self, self.drone_parser)
-                
+        
                 # Start UDP packet capture with telemetry handler callback
                 self.drone_parser.start(callback=self.telemetry_handler.on_udp_packet_received)
                 print(f"DroneParser started - capturing UDP packets on port {drone_port}")
+            except TypeError:
+                try:
+                    self.drone_parser = DroneParser(port=drone_port)
+                    self.telemetry_handler = DroneTelemetryHandler(self, self.drone_parser)
+        
+                    # Start UDP packet capture with telemetry handler callback
+                    self.drone_parser.start(callback=self.telemetry_handler.on_udp_packet_received)
+                    print(f"DroneParser started - capturing UDP packets on port {drone_port}")
+                except:
+                    self.drone_parser = DroneParser()
+            
+            # # Create telemetry handler
+            # if self.drone_parser is not None:
+            #     self.telemetry_handler = DroneTelemetryHandler(self, self.drone_parser)
+        
+            #     # Start UDP packet capture with telemetry handler callback
+            #     self.drone_parser.start(callback=self.telemetry_handler.on_udp_packet_received)
+            #     print(f"DroneParser started - capturing UDP packets on port {drone_port}")
             
         except ImportError as e:
             print(f"DroneParser import failed: {e}")
