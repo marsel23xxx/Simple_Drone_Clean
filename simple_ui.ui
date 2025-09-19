@@ -541,7 +541,7 @@ border-radius: 10px;</string>
       <rect>
        <x>10</x>
        <y>80</y>
-       <width>61</width>
+       <width>131</width>
        <height>21</height>
       </rect>
      </property>
@@ -557,7 +557,7 @@ font-weight: bold;
 border: 0px gray; </string>
      </property>
      <property name="text">
-      <string>Status     :</string>
+      <string>TCP Server                 :</string>
      </property>
     </widget>
     <widget class="QLabel" name="label_12">
@@ -565,7 +565,7 @@ border: 0px gray; </string>
       <rect>
        <x>10</x>
        <y>110</y>
-       <width>61</width>
+       <width>131</width>
        <height>21</height>
       </rect>
      </property>
@@ -581,7 +581,7 @@ font-weight: bold;
 border: 0px gray; </string>
      </property>
      <property name="text">
-      <string>Mode       :</string>
+      <string>Websocket Server   :</string>
      </property>
     </widget>
     <widget class="QLabel" name="label_13">
@@ -589,7 +589,7 @@ border: 0px gray; </string>
       <rect>
        <x>10</x>
        <y>140</y>
-       <width>61</width>
+       <width>131</width>
        <height>21</height>
       </rect>
      </property>
@@ -605,7 +605,7 @@ font-weight: bold;
 border: 0px gray; </string>
      </property>
      <property name="text">
-      <string>Control    :</string>
+      <string>Control                        :</string>
      </property>
     </widget>
     <widget class="QLabel" name="label_14">
@@ -639,7 +639,7 @@ border: 0px gray; </string>
     <widget class="QLabel" name="CommandStatus">
      <property name="geometry">
       <rect>
-       <x>80</x>
+       <x>150</x>
        <y>80</y>
        <width>141</width>
        <height>21</height>
@@ -662,7 +662,7 @@ border: 0px gray; </string>
     <widget class="QLabel" name="CommandMode">
      <property name="geometry">
       <rect>
-       <x>80</x>
+       <x>150</x>
        <y>110</y>
        <width>121</width>
        <height>21</height>
@@ -685,7 +685,7 @@ border: 0px gray; </string>
     <widget class="QLabel" name="CommandControl">
      <property name="geometry">
       <rect>
-       <x>80</x>
+       <x>150</x>
        <y>140</y>
        <width>111</width>
        <height>21</height>
