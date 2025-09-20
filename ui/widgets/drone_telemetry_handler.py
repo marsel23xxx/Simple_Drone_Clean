@@ -1,5 +1,5 @@
 """
-drone_telemetry_handler.py
+widgets/drone_telemetry_handler.py
 
 Dedicated handler for drone UDP telemetry data with thread-safe UI updates
 Handles all drone data processing and UI element updates
@@ -8,8 +8,8 @@ Handles all drone data processing and UI element updates
 import time
 import math
 from PyQt5.QtCore import QObject, pyqtSignal, QTimer
-from PyQt5.QtGui import QTransform, QPainter, QPixmap, QPen, QBrush
-from PyQt5.QtCore import Qt, QPointF
+from PyQt5.QtGui import QTransform, QPainter, QPixmap, QPen
+from PyQt5.QtCore import Qt
 
 
 class DroneTelemetryHandler(QObject):
@@ -54,17 +54,82 @@ class DroneTelemetryHandler(QObject):
         try:
             from config.settings import ASSET_PATHS
             
+            # Cache DroneTopView pixmap
             if 'drone_top' in ASSET_PATHS and ASSET_PATHS['drone_top'].exists():
                 self._original_top_pixmap = QPixmap(str(ASSET_PATHS['drone_top']))
-                
+                # Set initial pixmap if not already set
+                if self.ui.DroneTopView.pixmap() is None:
+                    self.ui.DroneTopView.setPixmap(self._original_top_pixmap)
+                    
+            # Cache DroneBottomView pixmap  
             if 'drone_bottom' in ASSET_PATHS and ASSET_PATHS['drone_bottom'].exists():
                 self._original_bottom_pixmap = QPixmap(str(ASSET_PATHS['drone_bottom']))
-                
+                # Set initial pixmap if not already set
+                if self.ui.DroneBottomView.pixmap() is None:
+                    self.ui.DroneBottomView.setPixmap(self._original_bottom_pixmap)
+                    
+            # Cache DroneSideView pixmap
             if 'drone_display' in ASSET_PATHS and ASSET_PATHS['drone_display'].exists():
                 self._original_side_pixmap = QPixmap(str(ASSET_PATHS['drone_display']))
+                # Set initial pixmap if not already set
+                if self.ui.DroneSideView.pixmap() is None:
+                    self.ui.DroneSideView.setPixmap(self._original_side_pixmap)
+                    
+            # Fallback: try to get pixmaps from existing QLabel content
+            if not self._original_top_pixmap and self.ui.DroneTopView.pixmap():
+                self._original_top_pixmap = self.ui.DroneTopView.pixmap().copy()
+                
+            if not self._original_bottom_pixmap and self.ui.DroneBottomView.pixmap():
+                self._original_bottom_pixmap = self.ui.DroneBottomView.pixmap().copy()
+                
+            if not self._original_side_pixmap and self.ui.DroneSideView.pixmap():
+                self._original_side_pixmap = self.ui.DroneSideView.pixmap().copy()
                 
         except Exception as e:
             print(f"Error caching visual assets: {e}")
+            # Create simple colored pixmaps as fallback
+            self.create_fallback_pixmaps()
+    
+    def create_fallback_pixmaps(self):
+        """Create simple colored pixmaps as fallback when assets are not available."""
+        try:
+            # Create simple 100x100 colored rectangles as drone representations
+            size = 100
+            
+            # Top view - Blue rectangle
+            self._original_top_pixmap = QPixmap(size, size)
+            self._original_top_pixmap.fill(Qt.blue)
+            painter = QPainter(self._original_top_pixmap)
+            painter.setPen(QPen(Qt.white, 2))
+            painter.drawRect(10, 10, size-20, size-20)
+            painter.drawText(30, 55, "TOP")
+            painter.end()
+            self.ui.DroneTopView.setPixmap(self._original_top_pixmap)
+            
+            # Bottom view - Green rectangle  
+            self._original_bottom_pixmap = QPixmap(size, size)
+            self._original_bottom_pixmap.fill(Qt.green)
+            painter = QPainter(self._original_bottom_pixmap)
+            painter.setPen(QPen(Qt.white, 2))
+            painter.drawRect(10, 10, size-20, size-20)
+            painter.drawText(20, 55, "BOTTOM")
+            painter.end()
+            self.ui.DroneBottomView.setPixmap(self._original_bottom_pixmap)
+            
+            # Side view - Red rectangle
+            self._original_side_pixmap = QPixmap(size, size)
+            self._original_side_pixmap.fill(Qt.red)
+            painter = QPainter(self._original_side_pixmap)
+            painter.setPen(QPen(Qt.white, 2))
+            painter.drawRect(10, 10, size-20, size-20)
+            painter.drawText(30, 55, "SIDE")
+            painter.end()
+            self.ui.DroneSideView.setPixmap(self._original_side_pixmap)
+            
+            print("Created fallback drone view pixmaps")
+            
+        except Exception as e:
+            print(f"Error creating fallback pixmaps: {e}")
     
     def on_udp_packet_received(self, record):
         """Thread-safe callback for UDP packets from scapy."""
@@ -95,7 +160,6 @@ class DroneTelemetryHandler(QObject):
             self.update_velocity_display(velocity)
             self.update_battery_display(battery)
             self.update_status_display(record)
-            self.update_drone_visual_orientation(rpy)
             
             # Update visual drone orientation
             if rpy:
@@ -231,100 +295,48 @@ class DroneTelemetryHandler(QObject):
             pitch_deg = rpy['pitch_deg'] 
             yaw_deg = rpy['yaw_deg']
             
-            # Update DroneTopView with yaw rotation
-            self.rotate_drone_view(self.ui.DroneTopView, yaw_deg, '_original_top_pixmap')
+            # Update DroneTopView with yaw rotation (drone rotates around Z-axis)
+            self.rotate_drone_view(self.ui.DroneTopView, yaw_deg, self._original_top_pixmap)
             
-            # Update DroneBottomView with yaw rotation  
-            self.rotate_drone_view(self.ui.DroneBottomView, roll_deg, '_original_bottom_pixmap')
+            # Update DroneBottomView with roll rotation (drone tilts left/right)
+            self.rotate_drone_view(self.ui.DroneBottomView, roll_deg, self._original_bottom_pixmap)
             
-            # Update DroneSideView with pitch rotation
-            self.rotate_drone_view(self.ui.DroneSideView, pitch_deg, '_original_side_pixmap')
-            
-            # Update compass indicators
-            #self.update_compass_indicators(rpy)
+            # Update DroneSideView with pitch rotation (drone tilts forward/backward)
+            self.rotate_drone_view(self.ui.DroneSideView, pitch_deg, self._original_side_pixmap)
             
         except Exception as e:
             self.log_debug(f"Error updating visual orientation: {e}")
     
-    def rotate_drone_view(self, widget, angle_deg, pixmap_attr):
-        """Helper method to rotate drone view widgets."""
+    def rotate_drone_view(self, label_widget, angle_deg, original_pixmap):
+        """Helper method to rotate drone view QLabel widgets."""
         try:
-            if not hasattr(widget, 'setPixmap'):
-                return
-                
-            # Get cached pixmap
-            original_pixmap = getattr(self, pixmap_attr, None)
-            if not original_pixmap:
+            # Check if widget and pixmap are valid
+            if not label_widget or not original_pixmap or original_pixmap.isNull():
                 return
             
+            # Get original dimensions
             w, h = original_pixmap.width(), original_pixmap.height()
-
+            
+            # Create transform for rotation
             transform = QTransform()
-            transform.translate(w / 2, h / 2)   # move origin to center
-            transform.rotate(angle_deg)         # rotate
-            transform.translate(-w / 2, -h / 2) # move origin back
-
-            rotated_pixmap = original_pixmap.transformed(transform, Qt.SmoothTransformation)
-            widget.setPixmap(rotated_pixmap)
+            transform.translate(w / 2, h / 2)   # Move origin to center
+            transform.rotate(angle_deg)         # Rotate by angle
+            transform.translate(-w / 2, -h / 2) # Move origin back
+            
+            # Apply transformation with smooth rendering
+            rotated_pixmap = original_pixmap.transformed(
+                transform, 
+                Qt.SmoothTransformation
+            )
+            
+            # Set the rotated pixmap to the label
+            label_widget.setPixmap(rotated_pixmap)
+            
+            # Optional: scale to fit label if needed
+            label_widget.setScaledContents(True)
             
         except Exception as e:
             self.log_debug(f"Error rotating drone view: {e}")
-    
-    def update_compass_indicators(self, rpy):
-        """Update compass indicators with drone orientation."""
-        try:
-            yaw_deg = rpy['yaw_deg']
-            
-            # Update compass backgrounds with heading indicator
-            compass_labels = [self.ui.label_60, self.ui.label_61, self.ui.label_62]
-            
-            for compass_label in compass_labels:
-                if compass_label:
-                    self.draw_compass_with_heading(compass_label, yaw_deg)
-                    
-        except Exception as e:
-            self.log_debug(f"Error updating compass: {e}")
-    
-    def draw_compass_with_heading(self, compass_label, yaw_deg):
-        """Draw compass with heading indicator."""
-        try:
-            size = min(compass_label.width(), compass_label.height())
-            if size <= 0:
-                return
-                
-            compass_pixmap = QPixmap(size, size)
-            compass_pixmap.fill(Qt.transparent)
-            
-            painter = QPainter(compass_pixmap)
-            painter.setRenderHint(QPainter.Antialiasing)
-            
-            center = QPointF(size/2, size/2)
-            radius = size/2 - 10
-            
-            # Draw compass circle
-            painter.setPen(QPen(Qt.white, 2))
-            painter.setBrush(Qt.NoBrush)
-            painter.drawEllipse(center, radius, radius)
-            
-            # Draw heading indicator
-            painter.setPen(QPen(Qt.red, 3))
-            angle_rad = math.radians(yaw_deg - 90)  # Adjust for Qt coordinate system
-            end_x = center.x() + radius * 0.8 * math.cos(angle_rad)
-            end_y = center.y() + radius * 0.8 * math.sin(angle_rad)
-            painter.drawLine(center, QPointF(end_x, end_y))
-            
-            # Draw cardinal directions
-            painter.setPen(QPen(Qt.white, 1))
-            painter.drawText(center.x()-5, 15, "N")
-            painter.drawText(size-15, center.y()+5, "E") 
-            painter.drawText(center.x()-5, size-5, "S")
-            painter.drawText(5, center.y()+5, "W")
-            
-            painter.end()
-            compass_label.setPixmap(compass_pixmap)
-            
-        except Exception as e:
-            self.log_debug(f"Error drawing compass: {e}")
     
     def monitor_connection(self):
         """Monitor UDP connection status."""
@@ -369,6 +381,14 @@ class DroneTelemetryHandler(QObject):
             self.ui.DroneMode.setStyleSheet("color: #888888; font-weight: bold;")
             self.ui.DroneFlightTime.setText("00:00")
             
+            # Reset drone views to original orientation
+            if self._original_top_pixmap:
+                self.ui.DroneTopView.setPixmap(self._original_top_pixmap)
+            if self._original_bottom_pixmap:
+                self.ui.DroneBottomView.setPixmap(self._original_bottom_pixmap)
+            if self._original_side_pixmap:
+                self.ui.DroneSideView.setPixmap(self._original_side_pixmap)
+            
             # Reset flight timer
             self.flight_start_time = None
             
@@ -378,9 +398,9 @@ class DroneTelemetryHandler(QObject):
     def log_orientation_data(self, rpy):
         """Log orientation data for debugging."""
         try:
-            # print(f"Orientation - Roll: {rpy['roll_deg']:.1f}°, "
-            #               f"Pitch: {rpy['pitch_deg']:.1f}°, Yaw: {rpy['yaw_deg']:.1f}°")
-            pass
+            # Uncomment for debugging orientation data
+            print(f"Orientation - Roll: {rpy['roll_deg']:.1f}°, "
+                          f"Pitch: {rpy['pitch_deg']:.1f}°, Yaw: {rpy['yaw_deg']:.1f}°")
         except Exception as e:
             pass
     
