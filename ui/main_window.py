@@ -101,15 +101,7 @@ class DroneControlMainWindow(QMainWindow):
                     print(f"DroneParser started - capturing UDP packets on port {drone_port}")
                 except:
                     self.drone_parser = DroneParser()
-            
-            # # Create telemetry handler
-            # if self.drone_parser is not None:
-            #     self.telemetry_handler = DroneTelemetryHandler(self, self.drone_parser)
         
-            #     # Start UDP packet capture with telemetry handler callback
-            #     self.drone_parser.start(callback=self.telemetry_handler.on_udp_packet_received)
-            #     print(f"DroneParser started - capturing UDP packets on port {drone_port}")
-            
         except ImportError as e:
             print(f"DroneParser import failed: {e}")
             print("Make sure scapy is installed: pip install scapy")
@@ -159,7 +151,8 @@ class DroneControlMainWindow(QMainWindow):
             (self.ui.label_2, 'drone_display'),
             (self.ui.label_9, 'logo'),
             (self.ui.btAutonomousEmergency, 'emergency'),
-            (self.ui.DroneAltitude, 'altitude')
+            (self.ui.DroneAltitude, 'altitude'),
+            (self.ui.DroneHeight, 'height')
         ]
         
         for widget, asset_key in widgets_with_assets:
@@ -757,10 +750,30 @@ class DroneControlMainWindow(QMainWindow):
         orientation = (value / 50.0 - 1.0) * math.pi
         self.ui.mcOrientation.setText(f"{orientation:.4f} rad")
     
-    def update_altitude_display(self, value):
-        """Update altitude display."""
-        # This could be connected to drone altitude control
-        pass
+    def update_altitude_display(self, value=None):
+        """Update slider agar sesuai dengan nilai di QLabel DroneHeight (format 0.00 meter)."""
+        try:
+            # Ambil teks dari QLabel
+            height_text = self.ui.DroneHeight.text().strip()
+
+            # Jika label ada satuan 'm' atau 'meter', buang
+            if height_text.endswith(" meter"):
+                height_text = height_text.replace(" meter", "").strip()
+            elif height_text.endswith(" m"):
+                height_text = height_text.replace(" m", "").strip()
+
+            # Konversi ke float (misalnya "12.34")
+            altitude = float(height_text)
+
+            # Ubah ke cm (slider integer)
+            slider_value = int(round(altitude * 100))
+
+            # Update slider
+            self.ui.DroneAltitude.setValue(slider_value)
+
+        except ValueError:
+            # Kalau teks bukan angka valid, abaikan
+            pass
     
     def log_debug(self, message):
         """Log message ke debugging console."""

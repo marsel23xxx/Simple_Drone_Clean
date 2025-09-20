@@ -95,10 +95,11 @@ class DroneTelemetryHandler(QObject):
             self.update_velocity_display(velocity)
             self.update_battery_display(battery)
             self.update_status_display(record)
+            self.update_drone_visual_orientation(rpy)
             
             # Update visual drone orientation
             if rpy:
-                #self.update_drone_visual_orientation(rpy)
+                self.update_drone_visual_orientation(rpy)
                 self.log_orientation_data(rpy)
             
             # Update point cloud with drone position
@@ -240,7 +241,7 @@ class DroneTelemetryHandler(QObject):
             self.rotate_drone_view(self.ui.DroneSideView, pitch_deg, '_original_side_pixmap')
             
             # Update compass indicators
-            self.update_compass_indicators(rpy)
+            #self.update_compass_indicators(rpy)
             
         except Exception as e:
             self.log_debug(f"Error updating visual orientation: {e}")
@@ -256,11 +257,13 @@ class DroneTelemetryHandler(QObject):
             if not original_pixmap:
                 return
             
-            # Create rotation transform
+            w, h = original_pixmap.width(), original_pixmap.height()
+
             transform = QTransform()
-            transform.rotate(angle_deg)
-            
-            # Apply rotation
+            transform.translate(w / 2, h / 2)   # move origin to center
+            transform.rotate(angle_deg)         # rotate
+            transform.translate(-w / 2, -h / 2) # move origin back
+
             rotated_pixmap = original_pixmap.transformed(transform, Qt.SmoothTransformation)
             widget.setPixmap(rotated_pixmap)
             
@@ -345,7 +348,7 @@ class DroneTelemetryHandler(QObject):
         """Update connection status indicators."""
         try:
             if connected:
-                self.log_debug("UDP telemetry connected")
+                pass
             else:
                 self.log_debug("UDP telemetry disconnected")
                 self.clear_drone_displays()
