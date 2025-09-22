@@ -653,7 +653,7 @@ class DroneControlMainWindow(QMainWindow):
                 waypoints_strings.append(waypoint_str)
             
             waypoints_data_str = ",".join(waypoints_strings)
-            waypoints_command = f"waypoints {waypoints_data_str}"
+            waypoints_command = f"coordinates [{waypoints_data_str}]"
             waypoints_success = self.send_websocket_command(waypoints_command)
             
             if waypoints_success:
