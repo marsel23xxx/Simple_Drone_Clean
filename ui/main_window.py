@@ -144,9 +144,9 @@ class DroneControlMainWindow(QMainWindow):
             (self.ui.label_62, 'compass'),
             (self.ui.label_60, 'compass'), 
             (self.ui.label_61, 'compass'),
-            (self.ui.DroneBottomView, 'drone_bottom'),
-            (self.ui.DroneTopView, 'drone_top'),
-            (self.ui.DroneSideView, 'drone_display'),
+            # (self.ui.DroneBottomView, 'drone_bottom'),
+            # (self.ui.DroneTopView, 'drone_top'),
+            # (self.ui.DroneSideView, 'drone_display'),
             (self.ui.label, 'logo'),
             (self.ui.label_2, 'drone_display'),
             (self.ui.label_9, 'logo'),
@@ -218,7 +218,7 @@ class DroneControlMainWindow(QMainWindow):
         """Setup update timers."""
         # Status update timer
         self.status_timer = QTimer()
-        self.status_timer.timeout.connect(self.update_status)
+        #self.status_timer.timeout.connect(self.update_status)
         self.status_timer.start(UI_CONFIG['update_intervals']['status_update'])
     
     def start_services(self):
@@ -374,22 +374,7 @@ class DroneControlMainWindow(QMainWindow):
         # Could update UI with video stream info
         pass
     
-    def update_status(self):
-        """Update status display."""
-        if self.current_view_mode == "pointcloud":
-            if self.frame_count > 0:
-                status_text = f"LIVE - Point Cloud: {self.fps:.1f} FPS"
-            else:
-                status_text = "Waiting for point cloud data..."
-        else:
-            video_info = self.video_stream.get_video_info()
-            if video_info['connected']:
-                status_text = f"LIVE - Video: {video_info['fps']:.1f} FPS"
-            else:
-                status_text = "Waiting for video stream..."
-        
-        # Update command control status
-        self.ui.CommandControl.setText("Active" if self.frame_count > 0 else "Idle")
+    
     
     # Connection status methods
     def update_tcp_status(self, connected, message):
