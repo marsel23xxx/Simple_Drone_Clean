@@ -1,5 +1,5 @@
 """
-main_window.py (CLEANED VERSION)
+main_window.py (FIXED VERSION with GStreamer Video Integration)
 
 Drone Control Center Main Window dengan integrasi telemetry yang bersih
 """
@@ -19,7 +19,9 @@ from config.settings import (
     APP_CONFIG, UI_CONFIG, ASSET_PATHS, NETWORK_CONFIG, FILE_PATHS
 )
 from .widgets.point_cloud_widget import SmoothPointCloudWidget
-from .widgets.video_stream_widget import VideoStreamWidget, RTSPStreamWidget, TCPVideoStreamWidget
+
+from .widgets.video_stream_widget import RTSPStreamWidget, TCPVideoStreamWidget
+
 from .widgets.joystick_dialog import JoystickDialog
 from core.tcp_receiver import TCPDataReceiver, TCPServerThread
 from core.websocket_client import WebSocketCommandClient, WebSocketCommandThread
@@ -27,6 +29,7 @@ from core.drone_parser import DroneParser
 
 # Import telemetry handler
 from .widgets.drone_telemetry_handler import DroneTelemetryHandler
+
 class DroneControlMainWindow(QMainWindow):
     """Main Window yang mengintegrasikan UI design dengan fungsionalitas lengkap."""
     
@@ -119,9 +122,8 @@ class DroneControlMainWindow(QMainWindow):
         self.main_point_cloud.setGeometry(self.ui.SwitchView_1.geometry())
         self.main_point_cloud.setStyleSheet(self.ui.SwitchView_1.styleSheet())
         self.ui.SwitchView_1.hide()  # Hide original label
-        
-        # Replace SwitchView_2 dengan video streaming widget  
-        self.video_stream = VideoStreamWidget()
+  
+        self.video_stream = RTSPStreamWidget()
         self.video_stream.setParent(self.ui.frame_8)
         self.video_stream.setGeometry(self.ui.SwitchView_2.geometry())
         self.video_stream.setStyleSheet(self.ui.SwitchView_2.styleSheet())
@@ -193,6 +195,9 @@ class DroneControlMainWindow(QMainWindow):
         self.ui.btAutonomousEmergency.clicked.connect(self.emergency_stop)
         self.ui.DroneSwitch.clicked.connect(self.switch_views)
         
+        if hasattr(self.ui, 'btVideoStream'):  # Jika ada button di UI
+            self.ui.btVideoStream.clicked.connect(self.toggle_video_stream)
+        
         # Single Command controls
         self.ui.scHover.clicked.connect(lambda: self.send_websocket_command("hover"))
         self.ui.scSendGoto.clicked.connect(self.send_goto_command)
@@ -225,43 +230,57 @@ class DroneControlMainWindow(QMainWindow):
         """Start communication services."""
         self.start_tcp_server()
         
-        # Initialize video streaming (example with RTSP)
-        # Uncomment dan sesuaikan dengan sumber video Anda
-        # self.start_video_stream()
-        
     def start_tcp_server(self):
         """Start TCP server thread."""
         if self.tcp_thread is None or not self.tcp_thread.isRunning():
             self.tcp_thread = TCPServerThread(self.tcp_receiver)
             self.tcp_thread.start()
     
-    def start_video_stream(self, stream_url=None):
-        """Start video streaming."""
-        # Example: Start RTSP stream
-        if stream_url and stream_url.startswith('rtsp://'):
-            # Replace current video widget dengan RTSP widget
-            old_geometry = self.video_stream.geometry()
-            old_parent = self.video_stream.parent()
-            old_style = self.video_stream.styleSheet()
+    def start_video_stream(self, stream_url=None, width_scale=0.5, height_scale=0.5):
+        """Start video streaming dengan URL yang diberikan."""
+        if not stream_url:
+            stream_url = "rtsp://192.168.1.99:1234"  # Default URL
+        
+        try:
+            success = self.video_stream.start_stream(
+                rtsp_url=stream_url,
+                width_scale=width_scale,
+                height_scale=height_scale
+            )
             
-            self.video_stream.hide()
-            self.video_stream = RTSPStreamWidget(stream_url)
-            self.video_stream.setParent(old_parent)
-            self.video_stream.setGeometry(old_geometry)
-            self.video_stream.setStyleSheet(old_style)
-            self.video_stream.frame_received.connect(self.update_video_status)
-            
-            # Start the stream
-            success = self.video_stream.start_stream()
             if success:
                 self.log_debug(f"Video stream started: {stream_url}")
+                print(f"✅ Video stream started: {stream_url}")
+                return True
             else:
                 self.log_debug(f"Failed to start video stream: {stream_url}")
+                print(f"❌ Failed to start video stream: {stream_url}")
+                return False
+                
+        except Exception as e:
+            self.log_debug(f"Error starting video stream: {e}")
+            print(f"❌ Error starting video stream: {e}")
+            return False
+    
+    def stop_video_stream(self):
+        """Stop video streaming."""
+        try:
+            self.video_stream.stop_stream()
+            self.log_debug("Video stream stopped")
+            print("⏹ Video stream stopped")
+        except Exception as e:
+            self.log_debug(f"Error stopping video stream: {e}")
+            print(f"❌ Error stopping video stream: {e}")
+    
+    def toggle_video_stream(self):
+        """Toggle video stream on/off."""
+        if hasattr(self.video_stream, 'rtsp_camera') and self.video_stream.rtsp_camera:
+            # Stream sedang berjalan, stop
+            self.stop_video_stream()
         else:
-            # Setup TCP video streaming
-            if hasattr(self.tcp_receiver, 'video_frame_received'):
-                self.video_stream.set_tcp_receiver(self.tcp_receiver)
-                self.log_debug("TCP video stream configured")
+            # Stream tidak berjalan, start
+            rtsp_url = "rtsp://192.168.1.99:1234"  # Ganti sesuai URL Anda
+            self.start_video_stream(rtsp_url)
     
     # WebSocket methods
     def toggle_connection(self):
@@ -775,7 +794,7 @@ class DroneControlMainWindow(QMainWindow):
             cursor.select(cursor.LineUnderCursor)
             cursor.removeSelectedText()
             cursor.deleteChar()
-    
+   
     def closeEvent(self, event):
         """Clean shutdown with telemetry handler cleanup."""
         print("Shutting down Drone Control Center...")
@@ -783,10 +802,12 @@ class DroneControlMainWindow(QMainWindow):
         # Cleanup telemetry handler
         if hasattr(self, 'telemetry_handler') and self.telemetry_handler:
             self.telemetry_handler.cleanup()
-        
-        # Stop video stream
-        if hasattr(self, 'video_stream') and hasattr(self.video_stream, 'stop_stream'):
-            self.video_stream.stop_stream()
+ 
+        try:
+            if hasattr(self, 'video_stream'):
+                self.stop_video_stream()
+        except Exception as e:
+            print(f"Error stopping video stream: {e}")
         
         # Stop TCP server
         if hasattr(self, 'tcp_receiver'):

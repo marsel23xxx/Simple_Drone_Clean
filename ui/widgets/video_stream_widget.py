@@ -1,13 +1,125 @@
 """
-Video Stream Widget
-Widget untuk menampilkan video streaming dari drone
+Video Stream Widget - Integrated Version
+Widget untuk menampilkan video streaming dari drone dengan GStreamer support
 """
 
 import cv2
 import numpy as np
+import threading
+import time
+import os
+import sys
 from PyQt5.QtWidgets import QWidget, QLabel, QVBoxLayout
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QThread, pyqtSlot
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QColor, QFont
+
+# Setup untuk custom OpenCV (dari file teman)
+def setup_custom_opencv():
+    """Setup custom OpenCV dengan GStreamer support"""
+    try:
+        cv_folder = os.path.join(os.getcwd(), "cv_custom")
+        if os.path.exists(cv_folder):
+            os.add_dll_directory(cv_folder)
+            sys.path.insert(0, cv_folder)
+            os.environ["GST_PLUGIN_PATH"] = cv_folder
+            
+            # Optional: suppress GTK / pygobject warnings
+            os.environ["GI_TYPELIB_PATH"] = ""
+            os.environ["PYGOBJECT_WARNINGS"] = "0"
+            
+            import cv_custom as cv3
+            return cv3
+    except Exception as e:
+        print(f"Failed to load custom OpenCV: {e}")
+        
+    return cv2  # Fallback to regular OpenCV
+
+
+class RTSPCamera(QThread):
+    """RTSP Camera class dengan GStreamer support (modified from teman's file)"""
+    
+    frame_ready = pyqtSignal(np.ndarray)
+    connection_status_changed = pyqtSignal(str)
+    
+    def __init__(self, rtsp_url, width_scale=0.5, height_scale=0.5):
+        super().__init__()
+        self.rtsp_url = rtsp_url
+        self.width_scale = width_scale
+        self.height_scale = height_scale
+        self.frame = None
+        self.running = False
+        self.lock = threading.Lock()
+        self.cap = None
+        self.cv_module = setup_custom_opencv()
+        
+    def run(self):
+        """Main thread untuk capture video"""
+        self.running = True
+        self.connection_status_changed.emit("Connecting...")
+        
+        # Try GStreamer pipeline first (from teman's implementation)
+        gst_pipeline = (
+            f'rtspsrc location={self.rtsp_url} latency=0 drop-on-latency=true ! '
+            f'rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! '
+            f'video/x-raw,format=BGR ! appsink drop=true sync=false max-buffers=1'
+        )
+        
+        # Try custom OpenCV with GStreamer
+        try:
+            if hasattr(self.cv_module, 'CAP_GSTREAMER'):
+                self.cap = self.cv_module.VideoCapture(gst_pipeline, self.cv_module.CAP_GSTREAMER)
+            else:
+                self.cap = self.cv_module.VideoCapture(gst_pipeline)
+        except Exception as e:
+            print(f"Failed to create GStreamer pipeline: {e}")
+            # Fallback to direct RTSP
+            self.cap = self.cv_module.VideoCapture(self.rtsp_url)
+
+        if not self.cap.isOpened():
+            print("❌ Failed to open RTSP stream")
+            self.connection_status_changed.emit("Connection Failed")
+            self.running = False
+            return
+
+        self.connection_status_changed.emit("Connected")
+        print("✅ RTSP stream opened successfully")
+        
+        if hasattr(self.cv_module, 'getBuildInformation'):
+            build_info = self.cv_module.getBuildInformation()
+            gstreamer_enabled = "GStreamer:                   YES" in build_info
+            print(f"OpenCV version: {self.cv_module.__version__}")
+            print(f"GStreamer enabled: {gstreamer_enabled}")
+
+        while self.running:
+            ret, frame = self.cap.read()
+            if not ret:
+                continue
+
+            # Resize frame sesuai scale (dari implementasi teman)
+            if self.width_scale != 1.0 or self.height_scale != 1.0:
+                h, w = frame.shape[:2]
+                frame = self.cv_module.resize(frame, 
+                    (int(w * self.width_scale), int(h * self.height_scale)))
+
+            with self.lock:
+                self.frame = frame.copy()
+                
+            # Emit signal untuk update UI
+            self.frame_ready.emit(frame)
+            
+            self.msleep(1)  # Small delay
+
+    def stop(self):
+        """Stop camera capture"""
+        self.running = False
+        if self.cap:
+            self.cap.release()
+        self.wait()  # Wait for thread to finish
+
+    def get_frame(self):
+        """Get current frame (thread safe)"""
+        with self.lock:
+            return self.frame.copy() if self.frame is not None else None
 
 
 class VideoStreamWidget(QWidget):
@@ -109,7 +221,6 @@ class VideoStreamWidget(QWidget):
             self.connection_status = "Connected"
             
             # Calculate FPS
-            import time
             current_time = time.time()
             if hasattr(self, '_last_frame_time'):
                 time_diff = current_time - self._last_frame_time
@@ -214,54 +325,78 @@ class VideoStreamWidget(QWidget):
 
 
 class RTSPStreamWidget(VideoStreamWidget):
-    """Video streaming widget dengan RTSP support."""
+    """Video streaming widget dengan RTSP support menggunakan GStreamer."""
     
-    def __init__(self, rtsp_url=None):
+    def __init__(self, rtsp_url=None, width_scale=0.5, height_scale=0.5):
         super().__init__()
         self.rtsp_url = rtsp_url
-        self.cap = None
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.read_frame)
+        self.width_scale = width_scale
+        self.height_scale = height_scale
+        self.rtsp_camera = None
         
-    def start_stream(self, rtsp_url=None):
-        """Start RTSP stream."""
+    def start_stream(self, rtsp_url=None, width_scale=None, height_scale=None):
+        """Start RTSP stream dengan GStreamer."""
         if rtsp_url:
             self.rtsp_url = rtsp_url
+        if width_scale is not None:
+            self.width_scale = width_scale
+        if height_scale is not None:
+            self.height_scale = height_scale
             
         if not self.rtsp_url:
             print("No RTSP URL provided")
             return False
             
         try:
-            self.cap = cv2.VideoCapture(self.rtsp_url)
-            if self.cap.isOpened():
-                self.timer.start(33)  # ~30 FPS
-                self.connection_status = "Connecting..."
-                return True
-            else:
-                print(f"Failed to open RTSP stream: {self.rtsp_url}")
-                return False
+            # Stop existing stream if running
+            if self.rtsp_camera:
+                self.stop_stream()
+            
+            # Create new RTSP camera instance
+            self.rtsp_camera = RTSPCamera(
+                self.rtsp_url, 
+                self.width_scale, 
+                self.height_scale
+            )
+            
+            # Connect signals
+            self.rtsp_camera.frame_ready.connect(self.update_frame)
+            self.rtsp_camera.connection_status_changed.connect(self.update_connection_status)
+            
+            # Start the camera thread
+            self.rtsp_camera.start()
+            
+            return True
+            
         except Exception as e:
             print(f"Error starting RTSP stream: {e}")
             return False
     
     def stop_stream(self):
         """Stop RTSP stream."""
-        self.timer.stop()
-        if self.cap:
-            self.cap.release()
-            self.cap = None
+        if self.rtsp_camera:
+            self.rtsp_camera.stop()
+            self.rtsp_camera = None
         self.clear_video()
     
-    def read_frame(self):
-        """Read frame from RTSP stream."""
-        if self.cap and self.cap.isOpened():
-            ret, frame = self.cap.read()
-            if ret:
-                self.update_frame(frame)
-            else:
-                self.connection_status = "Connection Lost"
-                self.stop_stream()
+    @pyqtSlot(str)
+    def update_connection_status(self, status):
+        """Update connection status."""
+        self.connection_status = status
+        if status == "Connection Failed":
+            self.clear_video()
+            self.set_no_signal_message("Connection Failed")
+        elif status == "Connecting...":
+            self.set_no_signal_message("Connecting to RTSP stream...")
+    
+    def set_stream_quality(self, width_scale, height_scale):
+        """Set stream quality scale."""
+        self.width_scale = width_scale
+        self.height_scale = height_scale
+        
+        if self.rtsp_camera:
+            self.rtsp_camera.width_scale = width_scale
+            self.rtsp_camera.height_scale = height_scale
 
 
 class TCPVideoStreamWidget(VideoStreamWidget):
@@ -285,3 +420,55 @@ class TCPVideoStreamWidget(VideoStreamWidget):
             self.update_frame(data)
         except Exception as e:
             print(f"Error processing TCP video data: {e}")
+
+
+# Demo usage
+if __name__ == "__main__":
+    from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QPushButton, QHBoxLayout
+    import sys
+    
+    class MainWindow(QMainWindow):
+        def __init__(self):
+            super().__init__()
+            self.setWindowTitle("RTSP Video Stream Demo")
+            self.setGeometry(100, 100, 800, 600)
+            
+            central_widget = QWidget()
+            self.setCentralWidget(central_widget)
+            
+            layout = QVBoxLayout(central_widget)
+            
+            # Video widget
+            self.video_widget = RTSPStreamWidget()
+            layout.addWidget(self.video_widget)
+            
+            # Control buttons
+            button_layout = QHBoxLayout()
+            
+            self.start_button = QPushButton("Start Stream")
+            self.start_button.clicked.connect(self.start_stream)
+            button_layout.addWidget(self.start_button)
+            
+            self.stop_button = QPushButton("Stop Stream")
+            self.stop_button.clicked.connect(self.stop_stream)
+            button_layout.addWidget(self.stop_button)
+            
+            layout.addLayout(button_layout)
+            
+        def start_stream(self):
+            # Ganti dengan URL RTSP Anda
+            rtsp_url = "rtsp://192.168.1.99:1234"
+            success = self.video_widget.start_stream(rtsp_url, width_scale=0.5, height_scale=0.5)
+            if success:
+                print("Stream started")
+            else:
+                print("Failed to start stream")
+                
+        def stop_stream(self):
+            self.video_widget.stop_stream()
+            print("Stream stopped")
+    
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec_())
