@@ -389,8 +389,6 @@ class DroneControlMainWindow(QMainWindow):
     
     def update_video_status(self):
         """Update video stream status."""
-        video_info = self.video_stream.get_video_info()
-        # Could update UI with video stream info
         pass
     
     
