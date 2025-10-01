@@ -406,6 +406,7 @@ class DroneControlMainWindow(QMainWindow):
     def start_services(self):
         """Start communication services."""
         self.start_tcp_server()
+        self.start_video_stream() 
         
     def start_tcp_server(self):
         """Start TCP server thread."""

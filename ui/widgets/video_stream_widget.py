@@ -1,41 +1,27 @@
 # video_stream_widget.py - System OpenCV with multiple RTSP methods
 import os
 import sys
+import cv2 as cv
+
 import threading
 import time
 import subprocess
 import socket
 import numpy as np
+import requests
+from urllib.parse import urlparse
+from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import QWidget, QLabel, QVBoxLayout
 from PyQt5.QtCore import Qt, pyqtSignal, QThread, pyqtSlot
 from PyQt5.QtGui import QPixmap, QImage, QPainter, QPen, QColor, QFont
 
-# Use system OpenCV only - avoid custom OpenCV completely
-try:
-    import cv2 as cv
-    print(f"✅ System OpenCV loaded: {cv.__version__}")
-    
-    # Check capabilities
-    if hasattr(cv, 'getBuildInformation'):
-        build_info = cv.getBuildInformation()
-        has_gstreamer = "GStreamer:                   YES" in build_info
-        has_ffmpeg = "FFMPEG:                      YES" in build_info
-        print(f"GStreamer support: {has_gstreamer}")
-        print(f"FFMPEG support: {has_ffmpeg}")
-    else:
-        has_gstreamer = False
-        has_ffmpeg = False
-        print("Cannot check OpenCV build information")
-        
-except ImportError as e:
-    print(f"❌ Failed to import system OpenCV: {e}")
-    cv = None
-    has_gstreamer = False
-    has_ffmpeg = False
+has_gstreamer = False
+has_ffmpeg = True
 
 
 class RTSPConnectionTester:
     """Test RTSP connection using different methods"""
+
     
     @staticmethod
     def test_rtsp_connectivity(rtsp_url, timeout=5):
@@ -105,9 +91,11 @@ class RTSPCamera(QThread):
     frame_ready = pyqtSignal(np.ndarray)
     connection_status_changed = pyqtSignal(str)
     
-    def __init__(self, rtsp_url, width_scale=0.5, height_scale=0.5):
+    def __init__(self, rtsp_url, base1, base2, width_scale=0.5, height_scale=0.5):
         super().__init__()
         self.rtsp_url = rtsp_url
+        self.base1 = base1
+        self.base2 = base2
         self.width_scale = width_scale
         self.height_scale = height_scale
         self.frame = None
@@ -341,6 +329,144 @@ class RTSPCamera(QThread):
         with self.lock:
             return self.frame.copy() if self.frame is not None else None
 
+class HTTPStreamCamera:
+    """
+    Robust MJPEG reader for Flask/OpenCV endpoints like
+    http://HOST:PORT/video_feed (multipart/x-mixed-replace; boundary=...)
+    """
+    def __init__(self, base_url: str, path: str = "/video_feed",
+                 width_scale: float = 0.5, height_scale: float = 0.5):
+        self.base_url = base_url.rstrip('/')
+        self.url = self.base_url + (path if path.startswith('/') else '/' + path)
+        self.width_scale = width_scale
+        self.height_scale = height_scale
+        self.frame = None
+        self.running = False
+        self.lock = threading.Lock()
+        self.thread = None
+
+    def start(self):
+        if self.running:
+            return
+        self.running = True
+        self.thread = threading.Thread(target=self._loop_mjpeg_manual, daemon=True)
+        self.thread.start()
+
+    def stop(self):
+        self.running = False
+
+    def _loop_mjpeg_manual(self):
+        session = requests.Session()
+        headers = {
+            "Accept": "multipart/x-mixed-replace, image/jpeg",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Pragma": "no-cache",
+        }
+        while self.running:
+            try:
+                with session.get(self.url, stream=True, timeout=(3.0, 10.0), headers=headers) as r:
+                    ctype = r.headers.get('Content-Type', '')
+                    boundary = None
+                    if 'multipart' in ctype.lower():
+                        for t in ctype.split(';'):
+                            t = t.strip()
+                            if t.lower().startswith('boundary='):
+                                boundary = t.split('=', 1)[1].strip().strip('"')
+                                break
+                    if not boundary:
+                        boundary = 'frame'  # common default
+                    bnd = ('--' + boundary).encode('utf-8')
+
+                    buf = b''
+                    for chunk in r.iter_content(chunk_size=2048):
+                        if not self.running:
+                            break
+                        if not chunk:
+                            continue
+                        buf += chunk
+
+                        while True:
+                            start = buf.find(bnd)
+                            if start < 0:
+                                if len(buf) > 2_000_000:
+                                    buf = buf[-1_000_000:]
+                                break
+
+                            # header end may be \r\n\r\n or \n\n
+                            hdr_end = buf.find(b"\r\n\r\n", start)
+                            sep_len = 4
+                            if hdr_end < 0:
+                                hdr_end = buf.find(b"\n\n", start)
+                                if hdr_end >= 0:
+                                    sep_len = 2
+                            if hdr_end < 0:
+                                break
+
+                            headers_block = buf[start+len(bnd):hdr_end]
+                            content_length = None
+                            for line in headers_block.splitlines():
+                                ln = line.strip().lower()
+                                if ln.startswith(b'content-length:'):
+                                    try:
+                                        content_length = int(line.split(b':', 1)[1].strip())
+                                    except Exception:
+                                        content_length = None
+                                    break
+
+                            payload_start = hdr_end + sep_len
+                            if content_length is not None:
+                                end = payload_start + content_length
+                                if len(buf) < end:
+                                    break
+                                jpeg_bytes = buf[payload_start:end]
+                                buf = buf[end:]
+                            else:
+                                next_b = buf.find(bnd, payload_start)
+                                if next_b < 0:
+                                    break
+                                jpeg_bytes = buf[payload_start:next_b]
+                                buf = buf[next_b:]
+
+                            arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+
+                            # Prefer reduced decode when downscaling (saves CPU)
+                            flags = cv.IMREAD_COLOR
+                            if self.width_scale <= 0.5 and self.height_scale <= 0.5:
+                                flags = getattr(cv, "IMREAD_REDUCED_COLOR_2", cv.IMREAD_COLOR)
+                            elif self.width_scale <= 0.25 and self.height_scale <= 0.25:
+                                flags = getattr(cv, "IMREAD_REDUCED_COLOR_4", cv.IMREAD_COLOR)
+
+                            img = cv.imdecode(arr, flags)
+                            if img is None:
+                                continue
+
+                            if flags == cv.IMREAD_COLOR and (self.width_scale != 1.0 or self.height_scale != 1.0):
+                                h, w = img.shape[:2]
+                                img = cv.resize(
+                                    img,
+                                    (int(w * self.width_scale), int(h * self.height_scale)),
+                                    interpolation=cv.INTER_AREA
+                                )
+
+                            # drop if UI consumer busy (prevents latency buildup)
+                            if not self.lock.acquire(blocking=False):
+                                continue
+                            try:
+                                self.frame = img
+                            finally:
+                                self.lock.release()
+
+            except Exception as e:
+                if self.running:
+                    print("⚠ MJPEG reconnect due to:", e, "on", self.url)
+                time.sleep(0.25)
+
+    def get_frame(self):
+        with self.lock:
+            return None if self.frame is None else self.frame.copy()
+
+
 
 class VideoStreamWidget(QWidget):
     """Widget for displaying video streaming from drone."""
@@ -378,6 +504,9 @@ class VideoStreamWidget(QWidget):
         # Info overlay
         self.show_info_overlay = True
         self.fps = 0.0
+        self.http_cam1 = None
+        self.http_cam2 = None
+        self.http_timer = None  # QTimer that polls HTTP frames and feeds the UI
         
         # Connection status
         self.connection_status = "Disconnected"
@@ -547,10 +676,15 @@ class RTSPStreamWidget(VideoStreamWidget):
         self.height_scale = height_scale
         self.rtsp_camera = None
         self.start_stream(self.rtsp_url, self.base1, self.base2, self.width_scale, self.height_scale)
+        self.http_cam1 = None
+        self.http_cam2 = None
+        self.http_timer = None  # QTimer that polls HTTP frames and feeds the UI
         
-    def start_stream(self, rtsp_url="rtsp://192.168.1.99:1234", base1="http://192.168.1.88:9001", base2="http://192.168.1.88:9002", width_scale=None, height_scale=None):
-        """Start RTSP stream with multiple fallback methods."""
         
+    def start_stream(self, rtsp_url="rtsp://192.168.1.99:1234",
+                     base1="http://192.168.1.88:9001",
+                     base2="http://192.168.1.88:9002",
+                     width_scale=None, height_scale=None):
         if rtsp_url:
             self.rtsp_url = rtsp_url
         if base1:
@@ -561,60 +695,126 @@ class RTSPStreamWidget(VideoStreamWidget):
             self.width_scale = width_scale
         if height_scale is not None:
             self.height_scale = height_scale
-            
+    
         if not self.rtsp_url:
             print("❌ No RTSP URL provided")
             return False
-        if not self.base1:
-            print("❌ No base1 URL provided")
+        if not self.base1 or not self.base2:
+            print("❌ base1/base2 URLs are required")
             return False
-        if not self.base2:
-            print("❌ No base2 URL provided")
-            return False
-        
+    
         print(f"🎬 Starting RTSP stream: {self.rtsp_url}")
         print(f"🎬 Starting Base1 stream: {self.base1}")
         print(f"🎬 Starting Base2 stream: {self.base2}")
-        
-        # Check if OpenCV is available
+    
         if cv is None:
             print("❌ OpenCV not available")
             self.set_no_signal_message("OpenCV Not Available")
             return False
-        
+    
         try:
-            # Stop existing stream if running
+            # stop previous
             if self.rtsp_camera:
                 self.stop_stream()
-            
-            # Create new RTSP camera instance
+    
+            # ---------- RTSP ----------
             self.rtsp_camera = RTSPCamera(
-                self.rtsp_url,
-                self.base1,
-                self.base2, 
-                self.width_scale, 
-                self.height_scale
+                self.rtsp_url, self.base1, self.base2,
+                self.width_scale, self.height_scale
             )
-            
-            # Connect signals
             self.rtsp_camera.frame_ready.connect(self.update_frame)
             self.rtsp_camera.connection_status_changed.connect(self.update_connection_status)
-            
-            # Start the camera thread
             self.rtsp_camera.start()
+    
+            # ---------- HTTP 9001/9002 ----------
+            # parse host/port from base urls
+            def _host_port(u: str):
+                p = urlparse(u)
+                return (p.hostname or "localhost", p.port or 80)
+    
+            h1, p1 = _host_port(self.base1)
+            h2, p2 = _host_port(self.base2)
+    
+            self.http_cam1 = None
+            self.http_cam2 = None
+    
             
+            self.http_cam1 = HTTPStreamCamera(self.base1, path="/video_feed",
+                                                  width_scale=self.width_scale,
+                                                  height_scale=self.height_scale)
+            self.http_cam1.start()
+            
+    
+            
+            self.http_cam2 = HTTPStreamCamera(self.base2, path="/video_feed",
+                                                  width_scale=self.width_scale,
+                                                  height_scale=self.height_scale)
+            self.http_cam2.start()
+            
+            
+    
+            # ---------- Poll HTTP frames on UI thread ----------
+            if self.http_timer:
+                self.http_timer.stop()
+                self.http_timer.deleteLater()
+                self.http_timer = None
+    
+            if self.http_cam1 or self.http_cam2:
+                self.http_timer = QTimer(self)
+                self.http_timer.timeout.connect(self._poll_http_frames)
+                self.http_timer.start(15)  # ~66 FPS poll (only updates when new frames exist)
+    
             return True
-            
+    
         except Exception as e:
-            print(f"❌ Error starting RTSP stream: {e}")
+            print(f"❌ Error starting streams: {e}")
             return False
     
+    
+    def get_all_frames(self):
+        """Get frames from all cameras (RTSP + HTTP1 + HTTP2)"""
+        frames = {}
+        
+        # Main RTSP camera
+        if self.rtsp_camera:
+            frame = self.rtsp_camera.get_frame()
+            if frame is not None:
+                frames['main'] = frame
+        
+        # HTTP Camera 1
+        if self.http_cam1:
+            frame = self.http_cam1.get_frame()
+            if frame is not None:
+                frames['camera1'] = frame
+        
+        # HTTP Camera 2
+        if self.http_cam2:
+            frame = self.http_cam2.get_frame()
+            if frame is not None:
+                frames['camera2'] = frame
+        
+        return frames
+    
     def stop_stream(self):
-        """Stop RTSP stream."""
         if self.rtsp_camera:
             self.rtsp_camera.stop()
             self.rtsp_camera = None
+    
+        if self.http_timer:
+            self.http_timer.stop()
+            self.http_timer.deleteLater()
+            self.http_timer = None
+    
+        if self.http_cam1:
+            self.http_cam1.stop()
+            self.http_cam1 = None
+    
+        if self.http_cam2:
+            self.http_cam2.stop()
+            self.http_cam2 = None
+    
         self.clear_video()
+    
     
     @pyqtSlot(str)
     def update_connection_status(self, status):
@@ -627,7 +827,32 @@ class RTSPStreamWidget(VideoStreamWidget):
             self.set_no_signal_message(status)
         elif "Trying" in status or "Testing" in status:
             self.set_no_signal_message(status)
-
+            
+    def _compose_frames(self, fr1, fr2):
+        """Side-by-side composite so the UI still uses a single QLabel."""
+        if fr1 is None and fr2 is None:
+            return None
+        if fr1 is None:
+            return fr2
+        if fr2 is None:
+            return fr1
+        # match heights then hconcat
+        h1, w1 = fr1.shape[:2]
+        h2, w2 = fr2.shape[:2]
+        if h1 != h2:
+            # resize fr2 to fr1's height (keep aspect)
+            new_w2 = int(w2 * (h1 / float(h2)))
+            fr2 = cv.resize(fr2, (new_w2, h1))
+        return np.hstack([fr1, fr2])
+    
+    def _poll_http_frames(self):
+        """Timer callback: grab frames from HTTP cams and push to the same UI."""
+        f1 = self.http_cam1.get_frame() if self.http_cam1 else None
+        f2 = self.http_cam2.get_frame() if self.http_cam2 else None
+        combo = self._compose_frames(f1, f2)
+        if combo is not None:
+            self.update_frame(combo)
+    
 
 class TCPVideoStreamWidget(VideoStreamWidget):
     """Video streaming widget with TCP socket support."""
