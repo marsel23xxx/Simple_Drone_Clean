@@ -7,6 +7,7 @@ Drone Control Center Main Window dengan integrasi telemetry yang bersih
 import sys
 import time
 import threading
+from ai.detection_system import AIDetectionSystem
 from pathlib import Path
 from PyQt5.QtWidgets import QMainWindow, QApplication, QLabel
 from PyQt5.QtCore import QTimer, Qt
@@ -52,6 +53,22 @@ class DroneControlMainWindow(QMainWindow):
         # Initialize communication components
         self.setup_communication()
         
+        # initialize AI Detection
+        self.ai_system = AIDetectionSystem(
+            crack_weights='models/crack.pt',
+            hazmat_weights='models/hazmat.pt',
+            rust_model_path='models/deeplabv3_corrosion_multiclass.pth'
+        )
+        
+        self.imgDetector = self.ui.imgDetector   
+        self.imgCapture = self.ui.imgCapture
+        
+        # Setup AI detection display labels
+        self.setup_ai_detection()
+        
+        # Connect AI signals
+        self.connect_ai_signals()
+        
         # Replace placeholder labels dengan functional widgets
         self.setup_functional_widgets()
         
@@ -67,6 +84,113 @@ class DroneControlMainWindow(QMainWindow):
         # Update asset paths untuk menggunakan path yang benar
         self.update_asset_paths()
     
+    def setup_ai_detection(self):
+        """Setup AI detection display on QLabels"""
+        # imgDetector - untuk live detection stream
+        self.imgDetector = self.ui.imgDetector
+        self.imgDetector.setScaledContents(True)
+        self.imgDetector.setStyleSheet("border: 2px solid #00ff00; background-color: #000000;")
+        
+        # imgCapture - untuk captured images
+        self.imgCapture = self.ui.imgCapture  
+        self.imgCapture.setScaledContents(True)
+        self.imgCapture.setStyleSheet("border: 2px solid #0000ff; background-color: #000000;")
+        
+        # Set initial placeholder text
+        self.imgDetector.setText("AI Detection\nWaiting for video...")
+        self.imgDetector.setAlignment(Qt.AlignCenter)
+        
+        self.imgCapture.setText("Captured Image\nNo capture yet")
+        self.imgCapture.setAlignment(Qt.AlignCenter)
+    
+    def connect_ai_signals(self):
+        """Connect AI detection signals to UI updates"""
+        # Connect detection frame signal
+        self.ai_system.detection_frame_ready.connect(self.update_detection_display)
+        
+        # Connect capture frame signal  
+        self.ai_system.capture_frame_ready.connect(self.update_capture_display)
+        
+        # Connect status signal
+        self.ai_system.detection_status.connect(self.update_ai_status)
+        
+        # Connect mode change signal
+        self.ai_system.mode_changed.connect(self.on_ai_mode_changed)
+    
+    def update_detection_display(self, frame):
+        """Update imgDetector QLabel with processed detection frame"""
+        try:
+            pixmap = AIDetectionSystem.numpy_to_qpixmap(frame)
+            
+            if not pixmap.isNull():
+                # Scale pixmap to fit label while maintaining aspect ratio
+                scaled_pixmap = pixmap.scaled(
+                    self.imgDetector.size(),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
+                self.imgDetector.setPixmap(scaled_pixmap)
+        except Exception as e:
+            print(f"Error updating detection display: {e}")
+            
+    def update_capture_display(self, frame):
+        """Update imgCapture QLabel with captured image"""
+        try:
+            pixmap = AIDetectionSystem.numpy_to_qpixmap(frame)
+            
+            if not pixmap.isNull():
+                scaled_pixmap = pixmap.scaled(
+                    self.imgCapture.size(),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
+                self.imgCapture.setPixmap(scaled_pixmap)
+        except Exception as e:
+            print(f"Error updating capture display: {e}")
+    
+    def update_ai_status(self, status: str):
+        """Update AI detection status in UI"""
+        self.log_debug(f"AI Status: {status}")
+    
+    def on_ai_mode_changed(self, mode: str):
+        """Handle AI detection mode change"""
+        self.log_debug(f"AI Mode: {mode}")
+    
+    def start_ai_detection_from_video(self):
+        """
+        Start AI detection using video stream frames
+        Called when video stream is active
+        """
+        if hasattr(self, 'video_stream') and self.video_stream.rtsp_camera:
+            # Connect video stream to AI system
+            self.video_stream.frame_received.connect(self.feed_frame_to_ai)
+            
+            # Start AI processing
+            self.ai_system.start()
+            
+            self.log_debug("AI Detection started from video stream")
+    
+    def feed_frame_to_ai(self):
+        """Feed video stream frames to AI detection system"""
+        try:
+            if hasattr(self, 'video_stream') and self.video_stream.rtsp_camera:
+                # Get latest frame from video stream
+                ret, frame = self.video_stream.rtsp_camera.read()
+                
+                if ret and frame is not None:
+                    # Send frame to AI system for processing
+                    self.ai_system.update_frame(frame)
+        except Exception as e:
+            print(f"Error feeding frame to AI: {e}")
+    
+    def toggle_ai_detection_mode(self, mode_name: str):
+        """Toggle AI detection mode"""
+        if mode_name in AIDetectionSystem.MODES.values():
+            self.ai_system.set_mode(mode_name)
+        else:
+            print(f"Unknown AI mode: {mode_name}")
+            
+            
     def setup_communication(self):
         """Initialize communication components with UDP telemetry handler."""
         # TCP server for point cloud data
@@ -249,6 +373,7 @@ class DroneControlMainWindow(QMainWindow):
             )
             
             if success:
+                self.start_ai_detection_from_video()
                 self.log_debug(f"Video stream started: {stream_url}")
                 print(f"✅ Video stream started: {stream_url}")
                 return True
@@ -796,6 +921,10 @@ class DroneControlMainWindow(QMainWindow):
     def closeEvent(self, event):
         """Clean shutdown with telemetry handler cleanup."""
         print("Shutting down Drone Control Center...")
+        
+        # Ai detection System
+        if hasattr(self, 'ai_system'):
+            self.ai_system.stop()
         
         # Cleanup telemetry handler
         if hasattr(self, 'telemetry_handler') and self.telemetry_handler:
