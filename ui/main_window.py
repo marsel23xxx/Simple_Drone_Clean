@@ -85,37 +85,90 @@ class DroneControlMainWindow(QMainWindow):
         self.update_asset_paths()
     
     def setup_ai_detection(self):
-        """Setup AI detection display on QLabels"""
-        # imgDetector - untuk live detection stream
-        self.imgDetector = self.ui.imgDetector
+        """Setup AI detection display for 3 cameras"""
+        # Main Camera - akan ditampilkan di SwitchView yang aktif
+        # Tidak perlu setup di sini karena sudah dihandle di setup_functional_widgets()
+        
+        # Camera 1 - imgDetector
         self.imgDetector.setScaledContents(True)
         self.imgDetector.setStyleSheet("border: 2px solid #00ff00; background-color: #000000;")
-        
-        # imgCapture - untuk captured images
-        self.imgCapture = self.ui.imgCapture  
-        self.imgCapture.setScaledContents(True)
-        self.imgCapture.setStyleSheet("border: 2px solid #0000ff; background-color: #000000;")
-        
-        # Set initial placeholder text
-        self.imgDetector.setText("AI Detection\nWaiting for video...")
+        self.imgDetector.setText("Camera 1\nAI Detection\nWaiting...")
         self.imgDetector.setAlignment(Qt.AlignCenter)
         
-        self.imgCapture.setText("Captured Image\nNo capture yet")
+        # Camera 2 - imgCapture  
+        self.imgCapture.setScaledContents(True)
+        self.imgCapture.setStyleSheet("border: 2px solid #0000ff; background-color: #000000;")
+        self.imgCapture.setText("Camera 2\nAI Detection\nWaiting...")
         self.imgCapture.setAlignment(Qt.AlignCenter)
     
     def connect_ai_signals(self):
-        """Connect AI detection signals to UI updates"""
-        # Connect detection frame signal
-        self.ai_system.detection_frame_ready.connect(self.update_detection_display)
+        """Connect AI detection signals for 3 cameras"""
+        # Connect main camera - tampil di video_stream widget yang sudah ada
+        self.ai_system.main_camera_frame_ready.connect(self.update_main_camera_display)
         
-        # Connect capture frame signal  
-        self.ai_system.capture_frame_ready.connect(self.update_capture_display)
+        # Connect camera 1 - tampil di imgDetector
+        self.ai_system.camera1_frame_ready.connect(self.update_camera1_display)
         
-        # Connect status signal
+        # Connect camera 2 - tampil di imgCapture
+        self.ai_system.camera2_frame_ready.connect(self.update_camera2_display)
+        
+        # Connect status signals
         self.ai_system.detection_status.connect(self.update_ai_status)
-        
-        # Connect mode change signal
         self.ai_system.mode_changed.connect(self.on_ai_mode_changed)
+    
+    def update_main_camera_display(self, frame):
+        """Update Main Camera display (di video_stream widget)"""
+        try:
+            # Main camera sudah ditampilkan di video_stream widget
+            # Tapi kita perlu update dengan frame yang sudah di-detect AI
+            pixmap = AIDetectionSystem.numpy_to_qpixmap(frame)
+            if not pixmap.isNull() and hasattr(self, 'video_stream'):
+                # Update video_stream display dengan AI processed frame
+                # Implementasi tergantung video_stream_widget
+                pass
+        except Exception as e:
+            print(f"Error updating main camera display: {e}")
+
+    def update_camera1_display(self, frame):
+        """Update Camera 1 display (imgDetector)"""
+        try:
+            pixmap = AIDetectionSystem.numpy_to_qpixmap(frame)
+            if not pixmap.isNull():
+                scaled_pixmap = pixmap.scaled(
+                    self.imgDetector.size(),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
+                self.imgDetector.setPixmap(scaled_pixmap)
+        except Exception as e:
+            print(f"Error updating camera 1: {e}")
+
+    def update_camera2_display(self, frame):
+        """Update Camera 2 display (imgCapture)"""
+        try:
+            pixmap = AIDetectionSystem.numpy_to_qpixmap(frame)
+            if not pixmap.isNull():
+                scaled_pixmap = pixmap.scaled(
+                    self.imgCapture.size(),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
+                self.imgCapture.setPixmap(scaled_pixmap)
+        except Exception as e:
+            print(f"Error updating camera 2: {e}")
+        
+    def start_ai_detection_from_video(self):
+        """Start AI detection for all 3 cameras"""
+        if hasattr(self, 'video_stream'):
+            # Timer untuk feed frames dari semua camera
+            self.camera_feed_timer = QTimer()
+            self.camera_feed_timer.timeout.connect(self.feed_all_cameras_to_ai)
+            self.camera_feed_timer.start(30)  # 30ms = ~33 FPS
+            
+            # Start AI processing
+            self.ai_system.start()
+            
+            self.log_debug("AI Detection started for all 3 cameras")        
     
     def update_detection_display(self, frame):
         """Update imgDetector QLabel with processed detection frame"""
@@ -156,32 +209,32 @@ class DroneControlMainWindow(QMainWindow):
         """Handle AI detection mode change"""
         self.log_debug(f"AI Mode: {mode}")
     
-    def start_ai_detection_from_video(self):
-        """
-        Start AI detection using video stream frames
-        Called when video stream is active
-        """
-        if hasattr(self, 'video_stream') and self.video_stream.rtsp_camera:
-            # Connect video stream to AI system
-            self.video_stream.frame_received.connect(self.feed_frame_to_ai)
-            
-            # Start AI processing
-            self.ai_system.start()
-            
-            self.log_debug("AI Detection started from video stream")
-    
-    def feed_frame_to_ai(self):
-        """Feed video stream frames to AI detection system"""
+    def feed_all_cameras_to_ai(self):
+        """Feed all 3 camera frames to AI detection system"""
         try:
-            if hasattr(self, 'video_stream') and self.video_stream.rtsp_camera:
-                # Get latest frame from video stream
-                ret, frame = self.video_stream.rtsp_camera.read()
+            if hasattr(self, 'video_stream'):
+                # Get frames from video_stream widget
+                # Implementasi tergantung bagaimana video_stream mengelola 3 cameras
                 
-                if ret and frame is not None:
-                    # Send frame to AI system for processing
-                    self.ai_system.update_frame(frame)
+                # Contoh jika video_stream punya method get_frames():
+                frames = self.video_stream.get_all_frames()
+                
+                if frames:
+                    # Main camera (RTSP)
+                    if 'main' in frames and frames['main'] is not None:
+                        self.ai_system.update_frame('main', frames['main'])
+                    
+                    # Camera 1 (base1)
+                    if 'camera1' in frames and frames['camera1'] is not None:
+                        self.ai_system.update_frame('camera1', frames['camera1'])
+                    
+                    # Camera 2 (base2)
+                    if 'camera2' in frames and frames['camera2'] is not None:
+                        self.ai_system.update_frame('camera2', frames['camera2'])
+                        
         except Exception as e:
-            print(f"Error feeding frame to AI: {e}")
+            print(f"Error feeding cameras to AI: {e}")
+    
     
     def toggle_ai_detection_mode(self, mode_name: str):
         """Toggle AI detection mode"""
@@ -364,10 +417,14 @@ class DroneControlMainWindow(QMainWindow):
         """Start video streaming dengan URL yang diberikan."""
         if not stream_url:
             stream_url = "rtsp://192.168.1.99:1234"  # Default URL
+            cam1_url ="http://192.168.1.88:9001"
+            cam2_url ="http://192.168.1.88:9002"
         
         try:
             success = self.video_stream.start_stream(
                 rtsp_url=stream_url,
+                base1=cam1_url,
+                base2=cam2_url,
                 width_scale=width_scale,
                 height_scale=height_scale
             )
@@ -405,7 +462,9 @@ class DroneControlMainWindow(QMainWindow):
         else:
             # Stream tidak berjalan, start
             rtsp_url = "rtsp://192.168.1.99:1234"  # Ganti sesuai URL Anda
-            self.start_video_stream(rtsp_url)
+            cam1_url ="http://192.168.1.88:9001"
+            cam2_url ="http://192.168.1.88:9002"
+            self.start_video_stream(rtsp_url, cam1_url, cam2_url)
     
     # WebSocket methods
     def toggle_connection(self):
@@ -515,8 +574,6 @@ class DroneControlMainWindow(QMainWindow):
     def update_video_status(self):
         """Update video stream status."""
         pass
-    
-    
     
     # Connection status methods
     def update_tcp_status(self, connected, message):
@@ -922,9 +979,13 @@ class DroneControlMainWindow(QMainWindow):
         """Clean shutdown with telemetry handler cleanup."""
         print("Shutting down Drone Control Center...")
         
-        # Ai detection System
+        # Stop AI detection
         if hasattr(self, 'ai_system'):
             self.ai_system.stop()
+        
+        # Stop camera feed timer
+        if hasattr(self, 'camera_feed_timer'):
+            self.camera_feed_timer.stop()
         
         # Cleanup telemetry handler
         if hasattr(self, 'telemetry_handler') and self.telemetry_handler:

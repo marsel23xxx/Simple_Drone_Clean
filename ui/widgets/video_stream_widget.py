@@ -538,18 +538,25 @@ class VideoStreamWidget(QWidget):
 class RTSPStreamWidget(VideoStreamWidget):
     """Video streaming widget with RTSP support and multiple fallback methods."""
     
-    def __init__(self, rtsp_url="rtsp://192.168.1.99:1234", width_scale=0.5, height_scale=0.5):
+    def __init__(self, rtsp_url="rtsp://192.168.1.99:1234", base1="http://192.168.1.88:9001", base2="http://192.168.1.88:9002", width_scale=0.5, height_scale=0.5):
         super().__init__()
+        self.base1= base1
+        self.base2= base2
         self.rtsp_url = rtsp_url
         self.width_scale = width_scale
         self.height_scale = height_scale
         self.rtsp_camera = None
-        self.start_stream(self.rtsp_url, self.width_scale, self.height_scale)
+        self.start_stream(self.rtsp_url, self.base1, self.base2, self.width_scale, self.height_scale)
         
-    def start_stream(self, rtsp_url="rtsp://192.168.1.99:1234", width_scale=None, height_scale=None):
+    def start_stream(self, rtsp_url="rtsp://192.168.1.99:1234", base1="http://192.168.1.88:9001", base2="http://192.168.1.88:9002", width_scale=None, height_scale=None):
         """Start RTSP stream with multiple fallback methods."""
+        
         if rtsp_url:
             self.rtsp_url = rtsp_url
+        if base1:
+            self.base1 = base1
+        if base2:
+            self.base2 = base2
         if width_scale is not None:
             self.width_scale = width_scale
         if height_scale is not None:
@@ -558,8 +565,16 @@ class RTSPStreamWidget(VideoStreamWidget):
         if not self.rtsp_url:
             print("❌ No RTSP URL provided")
             return False
+        if not self.base1:
+            print("❌ No base1 URL provided")
+            return False
+        if not self.base2:
+            print("❌ No base2 URL provided")
+            return False
         
         print(f"🎬 Starting RTSP stream: {self.rtsp_url}")
+        print(f"🎬 Starting Base1 stream: {self.base1}")
+        print(f"🎬 Starting Base2 stream: {self.base2}")
         
         # Check if OpenCV is available
         if cv is None:
@@ -574,7 +589,9 @@ class RTSPStreamWidget(VideoStreamWidget):
             
             # Create new RTSP camera instance
             self.rtsp_camera = RTSPCamera(
-                self.rtsp_url, 
+                self.rtsp_url,
+                self.base1,
+                self.base2, 
                 self.width_scale, 
                 self.height_scale
             )
@@ -662,7 +679,9 @@ if __name__ == "__main__":
             
         def start_stream(self):
             rtsp_url = "rtsp://192.168.1.99:1234"
-            success = self.video_widget.start_stream(rtsp_url, width_scale=0.5, height_scale=0.5)
+            base1 = "http://192.168.1.88:9001"
+            base2 = "http://192.168.1.88:9002"
+            success = self.video_widget.start_stream(rtsp_url, base1, base2, width_scale=0.5, height_scale=0.5)
             if success:
                 print("✅ Stream start initiated")
             else:

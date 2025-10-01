@@ -1,33 +1,26 @@
 """
-AI Detection System - Main controller for all AI detections
-Integrates with PyQt5 UI through signals
+AI Detection System - Main controller with multi-camera support
 """
 
 import cv2
 import numpy as np
 import time
 import threading
-from PyQt5.QtCore import QObject, pyqtSignal, QTimer
+from PyQt5.QtCore import QObject, pyqtSignal
 from PyQt5.QtGui import QImage, QPixmap
 
 from .gpu_manager import gpu_manager
-# Import detectors akan ditambahkan sesuai kebutuhan
-# from .detectors.crack_detector import CrackDetector
-# from .detectors.hazmat_detector import HazmatDetector
-# dll
 
 
 class AIDetectionSystem(QObject):
-    """
-    AI Detection System with PyQt5 integration
-    Manages all detection modes and emits signals for UI updates
-    """
+    """AI Detection System with 3-camera support"""
     
-    # Signals for UI updates
-    detection_frame_ready = pyqtSignal(np.ndarray)  # Live detection frame
-    capture_frame_ready = pyqtSignal(np.ndarray)    # Captured image
-    detection_status = pyqtSignal(str)              # Status message
-    mode_changed = pyqtSignal(str)                  # Current detection mode
+    # Signals for 3 cameras
+    main_camera_frame_ready = pyqtSignal(np.ndarray)   # Main RTSP camera
+    camera1_frame_ready = pyqtSignal(np.ndarray)       # Camera 1 (base1)
+    camera2_frame_ready = pyqtSignal(np.ndarray)       # Camera 2 (base2)
+    detection_status = pyqtSignal(str)
+    mode_changed = pyqtSignal(str)
     
     MODES = {
         'STANDBY': 'standby',
@@ -51,13 +44,23 @@ class AIDetectionSystem(QObject):
         # Detection state
         self.current_mode = self.MODES['STANDBY']
         self.running = False
-        self.processing_thread = None
         
-        # Frame buffer for processing
-        self.current_frame = None
-        self.frame_lock = threading.Lock()
+        # 3 camera frames
+        self.camera_frames = {
+            'main': None,      # Main RTSP
+            'camera1': None,   # base1
+            'camera2': None    # base2
+        }
+        self.frame_locks = {
+            'main': threading.Lock(),
+            'camera1': threading.Lock(),
+            'camera2': threading.Lock()
+        }
         
-        # Detectors (lazy initialization)
+        # Processing threads
+        self.processing_threads = {}
+        
+        # Detectors
         self.crack_detector = None
         self.hazmat_detector = None
         self.qr_detector = None
@@ -65,167 +68,168 @@ class AIDetectionSystem(QObject):
         self.motion_detector = None
         self.landolt_detector = None
         
-        # GPU optimization
+        # GPU
         self.gpu_manager = gpu_manager
         
-        print(f"[AI] Detection System initialized with GPU: {self.gpu_manager.cuda_available}")
+        print(f"[AI] 3-Camera Detection System initialized with GPU: {self.gpu_manager.cuda_available}")
     
     def start(self):
-        """Start AI detection processing"""
+        """Start AI detection for all 3 cameras"""
         if not self.running:
             self.running = True
-            self.processing_thread = threading.Thread(target=self._process_loop, daemon=True)
-            self.processing_thread.start()
-            print("[AI] Detection system started")
+            
+            # Start thread for each camera
+            for camera_id in ['main', 'camera1', 'camera2']:
+                thread = threading.Thread(
+                    target=self._process_loop, 
+                    args=(camera_id,), 
+                    daemon=True
+                )
+                thread.start()
+                self.processing_threads[camera_id] = thread
+            
+            print("[AI] 3-Camera detection started")
     
     def stop(self):
-        """Stop AI detection processing"""
+        """Stop AI detection"""
         self.running = False
-        if self.processing_thread:
-            self.processing_thread.join(timeout=2.0)
-        print("[AI] Detection system stopped")
+        for thread in self.processing_threads.values():
+            if thread.is_alive():
+                thread.join(timeout=2.0)
+        self.processing_threads.clear()
+        print("[AI] 3-Camera detection stopped")
     
-    def update_frame(self, frame: np.ndarray):
+    def update_frame(self, camera_id: str, frame: np.ndarray):
         """
-        Update current frame for processing
-        Called from video stream
+        Update frame for specific camera
+        camera_id: 'main', 'camera1', or 'camera2'
         """
-        with self.frame_lock:
-            self.current_frame = frame.copy()
+        if camera_id in self.frame_locks:
+            with self.frame_locks[camera_id]:
+                self.camera_frames[camera_id] = frame.copy()
     
     def set_mode(self, mode: str):
-        """Set detection mode"""
+        """Set detection mode (applies to all cameras)"""
         if mode in self.MODES.values():
             self.current_mode = mode
             self.mode_changed.emit(mode)
-            print(f"[AI] Mode changed to: {mode}")
+            print(f"[AI] Mode changed to: {mode} (all cameras)")
     
-    def _process_loop(self):
-        """Main processing loop running in background thread"""
+    def _process_loop(self, camera_id: str):
+        """Processing loop for specific camera"""
+        # Map camera to signal
+        signal_map = {
+            'main': self.main_camera_frame_ready,
+            'camera1': self.camera1_frame_ready,
+            'camera2': self.camera2_frame_ready
+        }
+        
+        frame_signal = signal_map.get(camera_id)
+        
+        # Camera label untuk overlay
+        camera_labels = {
+            'main': 'MAIN CAM',
+            'camera1': 'CAM 1',
+            'camera2': 'CAM 2'
+        }
+        
         while self.running:
             try:
-                with self.frame_lock:
-                    if self.current_frame is not None:
-                        frame = self.current_frame.copy()
+                with self.frame_locks[camera_id]:
+                    if self.camera_frames[camera_id] is not None:
+                        frame = self.camera_frames[camera_id].copy()
                     else:
                         time.sleep(0.01)
                         continue
                 
-                # Process frame based on current mode
-                processed_frame = self._process_frame(frame)
+                # Process frame
+                processed_frame = self._process_frame(frame, camera_labels[camera_id])
                 
-                # Emit processed frame to UI
-                if processed_frame is not None:
-                    self.detection_frame_ready.emit(processed_frame)
+                # Emit processed frame
+                if processed_frame is not None and frame_signal:
+                    frame_signal.emit(processed_frame)
                 
-                # Small delay to prevent overload
-                time.sleep(0.03)  # ~30 FPS
+                # ~30 FPS
+                time.sleep(0.03)
                 
             except Exception as e:
-                print(f"[AI] Processing error: {e}")
+                print(f"[AI] {camera_id} error: {e}")
                 time.sleep(0.1)
     
-    def _process_frame(self, frame: np.ndarray) -> np.ndarray:
-        """
-        Process frame based on current mode
-        Returns processed frame with annotations
-        """
+    def _process_frame(self, frame: np.ndarray, camera_label: str) -> np.ndarray:
+        """Process frame based on current mode"""
+        # Add camera label
+        labeled_frame = frame.copy()
+        cv2.putText(labeled_frame, camera_label, 
+                   (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+        
         if self.current_mode == self.MODES['STANDBY']:
-            return self._draw_standby_overlay(frame)
-        
+            return self._draw_standby_overlay(labeled_frame)
         elif self.current_mode == self.MODES['CRACK']:
-            return self._process_crack(frame)
-        
+            return self._process_crack(labeled_frame)
         elif self.current_mode == self.MODES['HAZMAT']:
-            return self._process_hazmat(frame)
-        
+            return self._process_hazmat(labeled_frame)
         elif self.current_mode == self.MODES['QR']:
-            return self._process_qr(frame)
-        
+            return self._process_qr(labeled_frame)
         elif self.current_mode == self.MODES['LANDOLT']:
-            return self._process_landolt(frame)
-        
+            return self._process_landolt(labeled_frame)
         elif self.current_mode == self.MODES['MOTION']:
-            return self._process_motion(frame)
-        
+            return self._process_motion(labeled_frame)
         elif self.current_mode == self.MODES['RUST']:
-            return self._process_rust(frame)
+            return self._process_rust(labeled_frame)
         
-        return frame
+        return labeled_frame
     
     def _draw_standby_overlay(self, frame: np.ndarray) -> np.ndarray:
-        """Draw standby mode overlay"""
         overlay = frame.copy()
         gpu_status = "GPU ON" if self.gpu_manager.cuda_available else "GPU OFF"
-        cv2.putText(overlay, f"AI DETECTION - STANDBY [{gpu_status}]", 
-                   (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        cv2.putText(overlay, f"AI STANDBY [{gpu_status}]", 
+                   (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
         return overlay
     
+    # Placeholder detection methods
     def _process_crack(self, frame: np.ndarray) -> np.ndarray:
-        """Process crack detection"""
-        # Initialize detector if needed
-        if self.crack_detector is None:
-            # self.crack_detector = CrackDetector(...)
-            pass
-        
-        # Process with detector
-        # processed_frame, _ = self.crack_detector.process_frame(frame)
-        # return processed_frame
-        
-        # Placeholder
         overlay = frame.copy()
-        cv2.putText(overlay, "CRACK DETECTION MODE", 
-                   (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(overlay, "CRACK DETECTION", 
+                   (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
         return overlay
     
     def _process_hazmat(self, frame: np.ndarray) -> np.ndarray:
-        """Process hazmat detection"""
         overlay = frame.copy()
-        cv2.putText(overlay, "HAZMAT DETECTION MODE", 
-                   (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        cv2.putText(overlay, "HAZMAT DETECTION", 
+                   (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
         return overlay
     
     def _process_qr(self, frame: np.ndarray) -> np.ndarray:
-        """Process QR detection"""
         overlay = frame.copy()
-        cv2.putText(overlay, "QR DETECTION MODE", 
-                   (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 255), 2)
+        cv2.putText(overlay, "QR DETECTION", 
+                   (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
         return overlay
     
     def _process_landolt(self, frame: np.ndarray) -> np.ndarray:
-        """Process Landolt ring detection"""
         overlay = frame.copy()
-        cv2.putText(overlay, "LANDOLT DETECTION MODE", 
-                   (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(overlay, "LANDOLT DETECTION", 
+                   (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
         return overlay
     
     def _process_motion(self, frame: np.ndarray) -> np.ndarray:
-        """Process motion detection"""
         overlay = frame.copy()
-        cv2.putText(overlay, "MOTION DETECTION MODE", 
-                   (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+        cv2.putText(overlay, "MOTION DETECTION", 
+                   (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
         return overlay
     
     def _process_rust(self, frame: np.ndarray) -> np.ndarray:
-        """Process rust detection"""
         overlay = frame.copy()
-        cv2.putText(overlay, "RUST DETECTION MODE", 
-                   (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 128, 0), 2)
+        cv2.putText(overlay, "RUST DETECTION", 
+                   (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 128, 0), 2)
         return overlay
     
     @staticmethod
     def numpy_to_qpixmap(frame: np.ndarray) -> QPixmap:
-        """Convert numpy array to QPixmap for QLabel display"""
         if frame is None:
             return QPixmap()
-        
-        # Convert BGR to RGB
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         h, w, ch = rgb_frame.shape
         bytes_per_line = ch * w
-        
-        # Create QImage
         q_image = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
-        
-        # Convert to QPixmap
         return QPixmap.fromImage(q_image)
