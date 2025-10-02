@@ -1,4 +1,4 @@
-# video_stream_widget.py - System OpenCV with multiple RTSP methods
+# video_stream_widget.py - FIXED: Main camera only in SwitchView
 import os
 import sys
 import cv2 as cv
@@ -22,14 +22,12 @@ has_ffmpeg = True
 class RTSPConnectionTester:
     """Test RTSP connection using different methods"""
 
-    
     @staticmethod
     def test_rtsp_connectivity(rtsp_url, timeout=5):
         """Test if RTSP stream is reachable"""
         try:
-            # Parse RTSP URL to get host and port
             if rtsp_url.startswith('rtsp://'):
-                url_part = rtsp_url[7:]  # Remove 'rtsp://'
+                url_part = rtsp_url[7:]
                 if ':' in url_part and '/' in url_part:
                     host_port = url_part.split('/')[0]
                     if ':' in host_port:
@@ -37,13 +35,12 @@ class RTSPConnectionTester:
                         port = int(port)
                     else:
                         host = host_port
-                        port = 554  # Default RTSP port
+                        port = 554
                 else:
                     return False, "Invalid RTSP URL format"
             else:
                 return False, "Not an RTSP URL"
             
-            # Test TCP connection
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(timeout)
             result = sock.connect_ex((host, port))
@@ -67,7 +64,7 @@ class RTSPConnectionTester:
                 '-select_streams', 'v:0',
                 '-show_entries', 'stream=width,height,codec_name',
                 '-of', 'csv=p=0',
-                '-timeout', str(timeout * 1000000),  # ffprobe timeout in microseconds
+                '-timeout', str(timeout * 1000000),
                 rtsp_url
             ]
             
@@ -113,15 +110,12 @@ class RTSPCamera(QThread):
             self.running = False
             return
         
-        # Test connectivity first
         is_reachable, msg = RTSPConnectionTester.test_rtsp_connectivity(self.rtsp_url)
         print(f"RTSP connectivity test: {msg}")
         
         if not is_reachable:
             self.connection_status_changed.emit("Server Unreachable")
-            # Don't return immediately - still try OpenCV methods
         
-        # Try different connection methods in order of preference
         connection_methods = [
             self._try_gstreamer_pipeline,
             self._try_ffmpeg_backend,
@@ -145,10 +139,9 @@ class RTSPCamera(QThread):
         self.connection_status_changed.emit("Connected")
         print("✅ RTSP stream connected successfully")
         
-        # Main capture loop
         frame_count = 0
         consecutive_failures = 0
-        max_failures = 30  # Allow up to 30 consecutive failed reads
+        max_failures = 30
         
         while self.running:
             ret, frame = self.cap.read()
@@ -158,16 +151,15 @@ class RTSPCamera(QThread):
                 if consecutive_failures >= max_failures:
                     print(f"❌ Too many consecutive failures ({consecutive_failures})")
                     break
-                self.msleep(100)  # Wait longer on failure
+                self.msleep(100)
                 continue
             else:
-                consecutive_failures = 0  # Reset failure counter
+                consecutive_failures = 0
             
             frame_count += 1
-            if frame_count % 100 == 0:  # Log every 100 frames
+            if frame_count % 100 == 0:
                 print(f"📹 Captured {frame_count} frames")
             
-            # Resize frame if needed
             if self.width_scale != 1.0 or self.height_scale != 1.0:
                 h, w = frame.shape[:2]
                 frame = cv.resize(frame, 
@@ -182,7 +174,6 @@ class RTSPCamera(QThread):
         print("🛑 RTSP capture loop ended")
     
     def _try_gstreamer_pipeline(self):
-        """Try GStreamer pipeline (if available)"""
         if not has_gstreamer:
             print("⏭️ Skipping GStreamer (not available)")
             return False
@@ -198,7 +189,6 @@ class RTSPCamera(QThread):
             self.cap = cv.VideoCapture(gst_pipeline, cv.CAP_GSTREAMER)
             
             if self.cap.isOpened():
-                # Test by reading a frame
                 ret, test_frame = self.cap.read()
                 if ret and test_frame is not None:
                     print("✅ GStreamer pipeline working")
@@ -219,7 +209,6 @@ class RTSPCamera(QThread):
         return False
     
     def _try_ffmpeg_backend(self):
-        """Try FFMPEG backend"""
         if not has_ffmpeg:
             print("⏭️ Skipping FFMPEG (not available)")
             return False
@@ -229,10 +218,8 @@ class RTSPCamera(QThread):
             self.cap = cv.VideoCapture(self.rtsp_url, cv.CAP_FFMPEG)
             
             if self.cap.isOpened():
-                # Set some properties for better RTSP handling
                 self.cap.set(cv.CAP_PROP_BUFFERSIZE, 1)
                 
-                # Test by reading a frame
                 ret, test_frame = self.cap.read()
                 if ret and test_frame is not None:
                     print("✅ FFMPEG backend working")
@@ -253,13 +240,11 @@ class RTSPCamera(QThread):
         return False
     
     def _try_direct_rtsp(self):
-        """Try direct RTSP without specifying backend"""
         try:
             print("🔄 Trying direct RTSP...")
             self.cap = cv.VideoCapture(self.rtsp_url)
             
             if self.cap.isOpened():
-                # Test by reading a frame
                 ret, test_frame = self.cap.read()
                 if ret and test_frame is not None:
                     print("✅ Direct RTSP working")
@@ -280,10 +265,8 @@ class RTSPCamera(QThread):
         return False
     
     def _try_direct_rtsp_with_options(self):
-        """Try direct RTSP with modified URL options"""
         try:
             print("🔄 Trying RTSP with TCP transport...")
-            # Force TCP transport (sometimes helps with connection issues)
             rtsp_tcp_url = self.rtsp_url
             if '?' in rtsp_tcp_url:
                 rtsp_tcp_url += '&tcp'
@@ -293,10 +276,8 @@ class RTSPCamera(QThread):
             self.cap = cv.VideoCapture(rtsp_tcp_url)
             
             if self.cap.isOpened():
-                # Set minimal buffer
                 self.cap.set(cv.CAP_PROP_BUFFERSIZE, 1)
                 
-                # Test by reading a frame
                 ret, test_frame = self.cap.read()
                 if ret and test_frame is not None:
                     print("✅ RTSP with TCP transport working")
@@ -317,7 +298,6 @@ class RTSPCamera(QThread):
         return False
     
     def stop(self):
-        """Stop camera capture"""
         print("🛑 Stopping RTSP camera...")
         self.running = False
         if self.cap:
@@ -325,15 +305,12 @@ class RTSPCamera(QThread):
         self.wait()
     
     def get_frame(self):
-        """Get current frame (thread safe)"""
         with self.lock:
             return self.frame.copy() if self.frame is not None else None
 
+
 class HTTPStreamCamera:
-    """
-    Robust MJPEG reader for Flask/OpenCV endpoints like
-    http://HOST:PORT/video_feed (multipart/x-mixed-replace; boundary=...)
-    """
+    """Robust MJPEG reader for Flask/OpenCV endpoints"""
     def __init__(self, base_url: str, path: str = "/video_feed",
                  width_scale: float = 0.5, height_scale: float = 0.5):
         self.base_url = base_url.rstrip('/')
@@ -375,7 +352,7 @@ class HTTPStreamCamera:
                                 boundary = t.split('=', 1)[1].strip().strip('"')
                                 break
                     if not boundary:
-                        boundary = 'frame'  # common default
+                        boundary = 'frame'
                     bnd = ('--' + boundary).encode('utf-8')
 
                     buf = b''
@@ -393,7 +370,6 @@ class HTTPStreamCamera:
                                     buf = buf[-1_000_000:]
                                 break
 
-                            # header end may be \r\n\r\n or \n\n
                             hdr_end = buf.find(b"\r\n\r\n", start)
                             sep_len = 4
                             if hdr_end < 0:
@@ -430,7 +406,6 @@ class HTTPStreamCamera:
 
                             arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
 
-                            # Prefer reduced decode when downscaling (saves CPU)
                             flags = cv.IMREAD_COLOR
                             if self.width_scale <= 0.5 and self.height_scale <= 0.5:
                                 flags = getattr(cv, "IMREAD_REDUCED_COLOR_2", cv.IMREAD_COLOR)
@@ -449,7 +424,6 @@ class HTTPStreamCamera:
                                     interpolation=cv.INTER_AREA
                                 )
 
-                            # drop if UI consumer busy (prevents latency buildup)
                             if not self.lock.acquire(blocking=False):
                                 continue
                             try:
@@ -467,7 +441,6 @@ class HTTPStreamCamera:
             return None if self.frame is None else self.frame.copy()
 
 
-
 class VideoStreamWidget(QWidget):
     """Widget for displaying video streaming from drone."""
     
@@ -477,11 +450,9 @@ class VideoStreamWidget(QWidget):
         super().__init__()
         self.setMinimumSize(400, 200)
         
-        # Setup layout
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         
-        # Video display label
         self.video_label = QLabel()
         self.video_label.setAlignment(Qt.AlignCenter)
         self.video_label.setStyleSheet("""
@@ -492,42 +463,34 @@ class VideoStreamWidget(QWidget):
                 font-size: 14px;
             }
         """)
-        # self.video_label.setText("No Video Stream\nWaiting for connection...")
         
         self.layout.addWidget(self.video_label)
         
-        # Current frame data
         self.current_frame = None
         self.frame_count = 0
         self.is_connected = False
         
-        # Info overlay
         self.show_info_overlay = True
         self.fps = 0.0
         self.http_cam1 = None
         self.http_cam2 = None
-        self.http_timer = None  # QTimer that polls HTTP frames and feeds the UI
+        self.http_timer = None
         
-        # Connection status
         self.connection_status = "Disconnected"
         
     def update_frame(self, frame_data):
         """Update with new video frame."""
         try:
-            # Convert frame_data to QImage
             if isinstance(frame_data, np.ndarray):
-                # OpenCV format (BGR)
                 if len(frame_data.shape) == 3:
                     height, width, channels = frame_data.shape
                     if channels == 3:
-                        # Convert BGR to RGB
                         rgb_frame = cv.cvtColor(frame_data, cv.COLOR_BGR2RGB)
                         qimage = QImage(rgb_frame.data, width, height, 
                                       width * 3, QImage.Format_RGB888)
                     else:
                         return
                 elif len(frame_data.shape) == 2:
-                    # Grayscale
                     height, width = frame_data.shape
                     qimage = QImage(frame_data.data, width, height, 
                                   width, QImage.Format_Grayscale8)
@@ -535,7 +498,6 @@ class VideoStreamWidget(QWidget):
                     return
                     
             elif isinstance(frame_data, bytes):
-                # JPEG encoded data
                 nparr = np.frombuffer(frame_data, np.uint8)
                 frame = cv.imdecode(nparr, cv.IMREAD_COLOR)
                 if frame is not None:
@@ -551,13 +513,11 @@ class VideoStreamWidget(QWidget):
             else:
                 return
             
-            # Store current frame
             self.current_frame = qimage
             self.frame_count += 1
             self.is_connected = True
             self.connection_status = "Connected"
             
-            # Calculate FPS
             current_time = time.time()
             if hasattr(self, '_last_frame_time'):
                 time_diff = current_time - self._last_frame_time
@@ -565,7 +525,6 @@ class VideoStreamWidget(QWidget):
                     self.fps = 0.9 * self.fps + 0.1 * (1.0 / time_diff)
             self._last_frame_time = current_time
             
-            # Update display
             self.update_display()
             self.frame_received.emit()
             
@@ -577,19 +536,15 @@ class VideoStreamWidget(QWidget):
         if self.current_frame is None:
             return
             
-        # Get widget size
         widget_size = self.video_label.size()
         
-        # Scale image to fit widget while maintaining aspect ratio
         scaled_image = self.current_frame.scaled(
             widget_size, Qt.KeepAspectRatio, Qt.SmoothTransformation
         )
         
-        # Add info overlay if enabled
         if self.show_info_overlay:
             scaled_image = self.add_info_overlay(scaled_image)
         
-        # Convert to pixmap and display
         pixmap = QPixmap.fromImage(scaled_image)
         self.video_label.setPixmap(pixmap)
     
@@ -604,7 +559,6 @@ class VideoStreamWidget(QWidget):
         painter.setFont(font)
         painter.setPen(QPen(QColor(255, 255, 255), 1))
         
-        # Create overlay text with OpenCV info
         cv_info = "No OpenCV"
         if cv:
             gst_status = "GStreamer" if has_gstreamer else "No GStreamer"
@@ -614,12 +568,10 @@ class VideoStreamWidget(QWidget):
         overlay_text = f"FPS: {self.fps:.1f} | Frames: {self.frame_count} | {self.connection_status}"
         overlay_text += f"\n{cv_info}"
         
-        # Calculate text area
         lines = overlay_text.split('\n')
         line_height = painter.fontMetrics().height()
         max_width = max(painter.fontMetrics().width(line) for line in lines)
         
-        # Draw background rectangle
         padding = 5
         rect_width = max_width + 2 * padding
         rect_height = len(lines) * line_height + 2 * padding
@@ -627,7 +579,6 @@ class VideoStreamWidget(QWidget):
         overlay_rect = painter.fontMetrics().boundingRect(10, 10, rect_width, rect_height, 0, "")
         painter.fillRect(overlay_rect, QColor(0, 0, 0, 128))
         
-        # Draw text lines
         y_pos = 10 + padding + line_height
         for line in lines:
             painter.drawText(10 + padding, y_pos, line)
@@ -665,7 +616,7 @@ class VideoStreamWidget(QWidget):
 
 
 class RTSPStreamWidget(VideoStreamWidget):
-    """Video streaming widget with RTSP support and multiple fallback methods."""
+    """Video streaming widget with RTSP support - Main camera only in SwitchView"""
     
     def __init__(self, rtsp_url="rtsp://192.168.1.99:1234", base1="http://192.168.1.88:9001", base2="http://192.168.1.88:9002", width_scale=0.5, height_scale=0.5):
         super().__init__()
@@ -678,7 +629,7 @@ class RTSPStreamWidget(VideoStreamWidget):
         self.start_stream(self.rtsp_url, self.base1, self.base2, self.width_scale, self.height_scale)
         self.http_cam1 = None
         self.http_cam2 = None
-        self.http_timer = None  # QTimer that polls HTTP frames and feeds the UI
+        # REMOVED: self.http_timer to prevent composite display in SwitchView
         
         
     def start_stream(self, rtsp_url="rtsp://192.168.1.99:1234",
@@ -713,21 +664,20 @@ class RTSPStreamWidget(VideoStreamWidget):
             return False
     
         try:
-            # stop previous
             if self.rtsp_camera:
                 self.stop_stream()
     
-            # ---------- RTSP ----------
+            # ---------- RTSP - Main Camera for SwitchView ----------
             self.rtsp_camera = RTSPCamera(
                 self.rtsp_url, self.base1, self.base2,
                 self.width_scale, self.height_scale
             )
+            # IMPORTANT: Only RTSP camera updates the main display (SwitchView)
             self.rtsp_camera.frame_ready.connect(self.update_frame)
             self.rtsp_camera.connection_status_changed.connect(self.update_connection_status)
             self.rtsp_camera.start()
     
-            # ---------- HTTP 9001/9002 ----------
-            # parse host/port from base urls
+            # ---------- HTTP Cameras (for AI detection only, not displayed here) ----------
             def _host_port(u: str):
                 p = urlparse(u)
                 return (p.hostname or "localhost", p.port or 80)
@@ -738,31 +688,20 @@ class RTSPStreamWidget(VideoStreamWidget):
             self.http_cam1 = None
             self.http_cam2 = None
     
-            
+            # Start HTTP cameras for AI processing (not for main display)
             self.http_cam1 = HTTPStreamCamera(self.base1, path="/video_feed",
-                                                  width_scale=self.width_scale,
-                                                  height_scale=self.height_scale)
+                                              width_scale=self.width_scale,
+                                              height_scale=self.height_scale)
             self.http_cam1.start()
             
-    
-            
             self.http_cam2 = HTTPStreamCamera(self.base2, path="/video_feed",
-                                                  width_scale=self.width_scale,
-                                                  height_scale=self.height_scale)
+                                              width_scale=self.width_scale,
+                                              height_scale=self.height_scale)
             self.http_cam2.start()
             
-            
-    
-            # ---------- Poll HTTP frames on UI thread ----------
-            if self.http_timer:
-                self.http_timer.stop()
-                self.http_timer.deleteLater()
-                self.http_timer = None
-    
-            if self.http_cam1 or self.http_cam2:
-                self.http_timer = QTimer(self)
-                self.http_timer.timeout.connect(self._poll_http_frames)
-                self.http_timer.start(15)  # ~66 FPS poll (only updates when new frames exist)
+            # REMOVED: QTimer polling for HTTP frames to prevent composite display
+            # HTTP cameras run in background for AI only
+            print("✅ HTTP cameras running for AI detection (not displayed in SwitchView)")
     
             return True
     
@@ -772,7 +711,7 @@ class RTSPStreamWidget(VideoStreamWidget):
     
     
     def get_all_frames(self):
-        """Get frames from all cameras (RTSP + HTTP1 + HTTP2)"""
+        """Get frames from all cameras (RTSP + HTTP1 + HTTP2) for AI processing"""
         frames = {}
         
         # Main RTSP camera
@@ -781,13 +720,13 @@ class RTSPStreamWidget(VideoStreamWidget):
             if frame is not None:
                 frames['main'] = frame
         
-        # HTTP Camera 1
+        # HTTP Camera 1 (for AI only)
         if self.http_cam1:
             frame = self.http_cam1.get_frame()
             if frame is not None:
                 frames['camera1'] = frame
         
-        # HTTP Camera 2
+        # HTTP Camera 2 (for AI only)
         if self.http_cam2:
             frame = self.http_cam2.get_frame()
             if frame is not None:
@@ -800,10 +739,7 @@ class RTSPStreamWidget(VideoStreamWidget):
             self.rtsp_camera.stop()
             self.rtsp_camera = None
     
-        if self.http_timer:
-            self.http_timer.stop()
-            self.http_timer.deleteLater()
-            self.http_timer = None
+        # No need to stop http_timer (it doesn't exist anymore)
     
         if self.http_cam1:
             self.http_cam1.stop()
@@ -827,32 +763,10 @@ class RTSPStreamWidget(VideoStreamWidget):
             self.set_no_signal_message(status)
         elif "Trying" in status or "Testing" in status:
             self.set_no_signal_message(status)
-            
-    def _compose_frames(self, fr1, fr2):
-        """Side-by-side composite so the UI still uses a single QLabel."""
-        if fr1 is None and fr2 is None:
-            return None
-        if fr1 is None:
-            return fr2
-        if fr2 is None:
-            return fr1
-        # match heights then hconcat
-        h1, w1 = fr1.shape[:2]
-        h2, w2 = fr2.shape[:2]
-        if h1 != h2:
-            # resize fr2 to fr1's height (keep aspect)
-            new_w2 = int(w2 * (h1 / float(h2)))
-            fr2 = cv.resize(fr2, (new_w2, h1))
-        return np.hstack([fr1, fr2])
     
-    def _poll_http_frames(self):
-        """Timer callback: grab frames from HTTP cams and push to the same UI."""
-        f1 = self.http_cam1.get_frame() if self.http_cam1 else None
-        f2 = self.http_cam2.get_frame() if self.http_cam2 else None
-        combo = self._compose_frames(f1, f2)
-        if combo is not None:
-            self.update_frame(combo)
-    
+    # REMOVED: _compose_frames and _poll_http_frames methods
+    # These were causing cam1+cam2 composite to override main camera
+
 
 class TCPVideoStreamWidget(VideoStreamWidget):
     """Video streaming widget with TCP socket support."""
@@ -873,62 +787,3 @@ class TCPVideoStreamWidget(VideoStreamWidget):
             self.update_frame(data)
         except Exception as e:
             print(f"Error processing TCP video data: {e}")
-
-
-# Demo usage
-if __name__ == "__main__":
-    from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QPushButton, QHBoxLayout
-    import sys
-    
-    class MainWindow(QMainWindow):
-        def __init__(self):
-            super().__init__()
-            self.setWindowTitle("RTSP Video Stream - System OpenCV Only")
-            self.setGeometry(100, 100, 900, 700)
-            
-            central_widget = QWidget()
-            self.setCentralWidget(central_widget)
-            
-            layout = QVBoxLayout(central_widget)
-            
-            # Video widget
-            self.video_widget = RTSPStreamWidget()
-            layout.addWidget(self.video_widget)
-            
-            # Control buttons
-            button_layout = QHBoxLayout()
-            
-            self.start_stream()
-            
-            layout.addLayout(button_layout)
-            
-        def start_stream(self):
-            rtsp_url = "rtsp://192.168.1.99:1234"
-            base1 = "http://192.168.1.88:9001"
-            base2 = "http://192.168.1.88:9002"
-            success = self.video_widget.start_stream(rtsp_url, base1, base2, width_scale=0.5, height_scale=0.5)
-            if success:
-                print("✅ Stream start initiated")
-            else:
-                print("❌ Failed to start stream")
-        
-        def stop_stream(self):
-            self.video_widget.stop_stream()
-            print("🛑 Stream stopped")
-        
-        def test_connection(self):
-            rtsp_url = "rtsp://192.168.1.99:1234"
-            print("🔍 Testing RTSP connection...")
-            
-            # Test basic connectivity
-            reachable, msg = RTSPConnectionTester.test_rtsp_connectivity(rtsp_url)
-            print(f"Connectivity: {msg}")
-            
-            # Test with ffprobe if available
-            stream_info, info_msg = RTSPConnectionTester.test_with_ffprobe(rtsp_url)
-            print(f"Stream info: {info_msg}")
-    
-    app = QApplication(sys.argv)
-    window = MainWindow()
-    window.show()
-    sys.exit(app.exec_())
