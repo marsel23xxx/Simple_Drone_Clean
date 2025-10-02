@@ -618,45 +618,60 @@ class VideoStreamWidget(QWidget):
 class RTSPStreamWidget(VideoStreamWidget):
     """Video streaming widget with RTSP support - Main camera only in SwitchView"""
     
-    def __init__(self, rtsp_url="rtsp://192.168.1.99:1234", base1="http://192.168.1.88:9001", base2="http://192.168.1.88:9002", width_scale=0.5, height_scale=0.5):
+    def __init__(self, 
+                 rtsp_url="rtsp://192.168.1.99:1234", 
+                 rtsp_url_cam1="rtsp://localhost:8554/camera1",
+                 rtsp_url_cam2="rtsp://localhost:8554/camera2",
+                 width_scale=0.5, 
+                 height_scale=0.5):
         super().__init__()
-        self.base1= base1
-        self.base2= base2
+        
+        # Store URLs
         self.rtsp_url = rtsp_url
+        self.rtsp_url_cam1 = rtsp_url_cam1
+        self.rtsp_url_cam2 = rtsp_url_cam2
         self.width_scale = width_scale
         self.height_scale = height_scale
-        self.rtsp_camera = None
-        self.start_stream(self.rtsp_url, self.base1, self.base2, self.width_scale, self.height_scale)
-        self.http_cam1 = None
-        self.http_cam2 = None
-        # REMOVED: self.http_timer to prevent composite display in SwitchView
         
+        # Camera instances
+        self.rtsp_camera = None  # Main camera (for display)
+        self.rtsp_cam1 = None    # Camera 1 (for AI only)
+        self.rtsp_cam2 = None    # Camera 2 (for AI only)
         
-    def start_stream(self, rtsp_url="rtsp://192.168.1.99:1234",
-                     base1="http://192.168.1.88:9001",
-                     base2="http://192.168.1.88:9002",
+        # Start all streams
+        self.start_stream(self.rtsp_url, self.rtsp_url_cam1, self.rtsp_url_cam2,
+                          self.width_scale, self.height_scale)
+        
+    def start_stream(self, 
+                     rtsp_url="rtsp://192.168.1.99:1234",
+                     rtsp_url_cam1="rtsp://localhost:8554/camera1",
+                     rtsp_url_cam2="rtsp://localhost:8554/camera2",
                      width_scale=None, height_scale=None):
+        """Start all RTSP streams (main + cam1 + cam2)"""
+        
+        # Update parameters if provided
         if rtsp_url:
             self.rtsp_url = rtsp_url
-        if base1:
-            self.base1 = base1
-        if base2:
-            self.base2 = base2
+        if rtsp_url_cam1:
+            self.rtsp_url_cam1 = rtsp_url_cam1
+        if rtsp_url_cam2:
+            self.rtsp_url_cam2 = rtsp_url_cam2
         if width_scale is not None:
             self.width_scale = width_scale
         if height_scale is not None:
             self.height_scale = height_scale
     
+        # Validate URLs
         if not self.rtsp_url:
-            print("❌ No RTSP URL provided")
+            print("❌ No main RTSP URL provided")
             return False
-        if not self.base1 or not self.base2:
-            print("❌ base1/base2 URLs are required")
+        if not self.rtsp_url_cam1 or not self.rtsp_url_cam2:
+            print("❌ Camera 1 and 2 RTSP URLs are required")
             return False
     
-        print(f"🎬 Starting RTSP stream: {self.rtsp_url}")
-        print(f"🎬 Starting Base1 stream: {self.base1}")
-        print(f"🎬 Starting Base2 stream: {self.base2}")
+        print(f"🎬 Starting Main RTSP: {self.rtsp_url}")
+        print(f"🎬 Starting Camera 1 RTSP: {self.rtsp_url_cam1}")
+        print(f"🎬 Starting Camera 2 RTSP: {self.rtsp_url_cam2}")
     
         if cv is None:
             print("❌ OpenCV not available")
@@ -664,54 +679,58 @@ class RTSPStreamWidget(VideoStreamWidget):
             return False
     
         try:
+            # Stop existing streams if any
             if self.rtsp_camera:
                 self.stop_stream()
     
-            # ---------- RTSP - Main Camera for SwitchView ----------
+            # ---------- Main RTSP Camera (for SwitchView display) ----------
             self.rtsp_camera = RTSPCamera(
-                self.rtsp_url, self.base1, self.base2,
-                self.width_scale, self.height_scale
+                self.rtsp_url, 
+                "",
+                "",
+                self.width_scale, 
+                self.height_scale
             )
-            # IMPORTANT: Only RTSP camera updates the main display (SwitchView)
+            # IMPORTANT: Only RTSP camera updates the main display
             self.rtsp_camera.frame_ready.connect(self.update_frame)
             self.rtsp_camera.connection_status_changed.connect(self.update_connection_status)
             self.rtsp_camera.start()
+            print("✅ Main RTSP camera started")
     
-            # ---------- HTTP Cameras (for AI detection only, not displayed here) ----------
-            def _host_port(u: str):
-                p = urlparse(u)
-                return (p.hostname or "localhost", p.port or 80)
-    
-            h1, p1 = _host_port(self.base1)
-            h2, p2 = _host_port(self.base2)
-    
-            self.http_cam1 = None
-            self.http_cam2 = None
-    
-            # Start HTTP cameras for AI processing (not for main display)
-            self.http_cam1 = HTTPStreamCamera(self.base1, path="/video_feed",
-                                              width_scale=self.width_scale,
-                                              height_scale=self.height_scale)
-            self.http_cam1.start()
+            # ---------- Camera 1 RTSP (for AI detection only) ----------
+            self.rtsp_cam1 = RTSPCamera(
+                self.rtsp_url_cam1,
+                "", 
+                "",  
+                self.width_scale,
+                self.height_scale
+            )
+            # NOT connected to update_frame (runs in background for AI only)
+            self.rtsp_cam1.start()
+            print("✅ Camera 1 RTSP started (for AI detection)")
             
-            self.http_cam2 = HTTPStreamCamera(self.base2, path="/video_feed",
-                                              width_scale=self.width_scale,
-                                              height_scale=self.height_scale)
-            self.http_cam2.start()
-            
-            # REMOVED: QTimer polling for HTTP frames to prevent composite display
-            # HTTP cameras run in background for AI only
-            print("✅ HTTP cameras running for AI detection (not displayed in SwitchView)")
+            # ---------- Camera 2 RTSP (for AI detection only) ----------
+            self.rtsp_cam2 = RTSPCamera(
+                self.rtsp_url_cam2,
+                "", 
+                "", 
+                self.width_scale,
+                self.height_scale
+            )
+            # NOT connected to update_frame (runs in background for AI only)
+            self.rtsp_cam2.start()
+            print("✅ Camera 2 RTSP started (for AI detection)")
     
             return True
     
         except Exception as e:
-            print(f"❌ Error starting streams: {e}")
+            print(f"❌ Error starting RTSP streams: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
-    
     def get_all_frames(self):
-        """Get frames from all cameras (RTSP + HTTP1 + HTTP2) for AI processing"""
+        """Get frames from all cameras (Main + Camera1 + Camera2) for AI processing"""
         frames = {}
         
         # Main RTSP camera
@@ -720,41 +739,48 @@ class RTSPStreamWidget(VideoStreamWidget):
             if frame is not None:
                 frames['main'] = frame
         
-        # HTTP Camera 1 (for AI only)
-        if self.http_cam1:
-            frame = self.http_cam1.get_frame()
+        # RTSP Camera 1 (for AI only)
+        if hasattr(self, 'rtsp_cam1') and self.rtsp_cam1:
+            frame = self.rtsp_cam1.get_frame()
             if frame is not None:
                 frames['camera1'] = frame
         
-        # HTTP Camera 2 (for AI only)
-        if self.http_cam2:
-            frame = self.http_cam2.get_frame()
+        # RTSP Camera 2 (for AI only)
+        if hasattr(self, 'rtsp_cam2') and self.rtsp_cam2:
+            frame = self.rtsp_cam2.get_frame()
             if frame is not None:
                 frames['camera2'] = frame
         
         return frames
     
     def stop_stream(self):
+        """Stop all RTSP streams"""
+        print("🛑 Stopping all streams...")
+        
+        # Stop main camera
         if self.rtsp_camera:
             self.rtsp_camera.stop()
             self.rtsp_camera = None
-    
-        # No need to stop http_timer (it doesn't exist anymore)
-    
-        if self.http_cam1:
-            self.http_cam1.stop()
-            self.http_cam1 = None
-    
-        if self.http_cam2:
-            self.http_cam2.stop()
-            self.http_cam2 = None
-    
+            print("✅ Main camera stopped")
+        
+        # Stop camera 1
+        if hasattr(self, 'rtsp_cam1') and self.rtsp_cam1:
+            self.rtsp_cam1.stop()
+            self.rtsp_cam1 = None
+            print("✅ Camera 1 stopped")
+        
+        # Stop camera 2
+        if hasattr(self, 'rtsp_cam2') and self.rtsp_cam2:
+            self.rtsp_cam2.stop()
+            self.rtsp_cam2 = None
+            print("✅ Camera 2 stopped")
+        
+        # Clear display
         self.clear_video()
-    
     
     @pyqtSlot(str)
     def update_connection_status(self, status):
-        """Update connection status."""
+        """Update connection status"""
         self.connection_status = status
         print(f"📡 Connection status: {status}")
         
@@ -763,11 +789,6 @@ class RTSPStreamWidget(VideoStreamWidget):
             self.set_no_signal_message(status)
         elif "Trying" in status or "Testing" in status:
             self.set_no_signal_message(status)
-    
-    # REMOVED: _compose_frames and _poll_http_frames methods
-    # These were causing cam1+cam2 composite to override main camera
-
-
 class TCPVideoStreamWidget(VideoStreamWidget):
     """Video streaming widget with TCP socket support."""
     

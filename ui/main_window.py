@@ -300,7 +300,13 @@ class DroneControlMainWindow(QMainWindow):
         self.main_point_cloud.setStyleSheet(self.ui.SwitchView_1.styleSheet())
         self.ui.SwitchView_1.hide()  # Hide original label
   
-        self.video_stream = RTSPStreamWidget()
+        self.video_stream = RTSPStreamWidget(
+            rtsp_url="rtsp://192.168.1.99:1234",
+            rtsp_url_cam1="rtsp://localhost:8554/camera1",  # Via MediaMTX
+            rtsp_url_cam2="rtsp://localhost:8554/camera2",  # Via MediaMTX
+            width_scale=0.5,
+            height_scale=0.5
+        )
         self.video_stream.setParent(self.ui.frame_8)
         self.video_stream.setGeometry(self.ui.SwitchView_2.geometry())
         self.video_stream.setStyleSheet(self.ui.SwitchView_2.styleSheet())
@@ -417,17 +423,19 @@ class DroneControlMainWindow(QMainWindow):
     def start_video_stream(self, stream_url=None, width_scale=0.5, height_scale=0.5):
         """Start video streaming dengan URL yang diberikan."""
         if not stream_url:
-            stream_url = "rtsp://192.168.1.99:1234"  # Default URL
-            cam1_url ="http://192.168.1.88:9001"
-            cam2_url ="http://192.168.1.88:9002"
+            stream_url = "rtsp://192.168.1.99:1234"  # Default main camera
+        if not cam1_url:
+            cam1_url = "rtsp://localhost:8554/camera1"  # Via MediaMTX
+        if not cam2_url:
+            cam2_url = "rtsp://localhost:8554/camera2"  # Via MediaMTX
         
         try:
             success = self.video_stream.start_stream(
-                rtsp_url=stream_url,
-                base1=cam1_url,
-                base2=cam2_url,
-                width_scale=width_scale,
-                height_scale=height_scale
+            rtsp_url=stream_url,
+            rtsp_url_cam1=cam1_url,
+            rtsp_url_cam2=cam2_url,
+            width_scale=width_scale,
+            height_scale=height_scale
             )
             
             if success:
@@ -462,9 +470,9 @@ class DroneControlMainWindow(QMainWindow):
             self.stop_video_stream()
         else:
             # Stream tidak berjalan, start
-            rtsp_url = "rtsp://192.168.1.99:1234"  # Ganti sesuai URL Anda
-            cam1_url ="http://192.168.1.88:9001"
-            cam2_url ="http://192.168.1.88:9002"
+            rtsp_url = "rtsp://192.168.1.99:1234"
+            cam1_url = "rtsp://localhost:8554/camera1"  # Via MediaMTX
+            cam2_url = "rtsp://localhost:8554/camera2"  # Via MediaMTX
             self.start_video_stream(rtsp_url, cam1_url, cam2_url)
     
     # WebSocket methods
