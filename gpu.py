@@ -18,6 +18,8 @@ from typing import List, Optional, Tuple
 from collections import deque
 import gc
 
+
+
 # Try to import easyocr, fallback if not available
 try:
     import easyocr
@@ -1205,7 +1207,7 @@ class CrackData:
         return self.max_thickness > 0.035 or self.length > 0.05
 
 class CrackDetectorLibrary:
-    def __init__(self, weights='models/crack.pt', conf_thresh=0.80, output_dir='ai_crack_captures'):
+    def __init__(self, weights='crack.pt', conf_thresh=0.80, output_dir='ai_crack_captures'):
         self.WARP_SIZE = 300
         self.M_PER_PIXEL = 0.10 / self.WARP_SIZE
         self.MIN_AREA = 5000
@@ -1931,14 +1933,14 @@ class PositionData:
         return f"X: {self.x_distance_m:.2f}m, Y: {abs(self.y_distance_m):.2f}m{y_direction}, Z: {self.z_height_ground_m:.2f}m"
 
 class RustDetector:
-    def __init__(self, model_path='models/deeplabv3_corrosion_multiclass.pth', conf_thresh=0.80,
+    def __init__(self, model_path='deeplabv3_corrosion_multiclass.pth', conf_thresh=0.80,
                  save_folder="ai_rust_captures", data_file="rust_data.txt", 
                  auto_capture_delay=1.0,
                  camera_focal_length=800,
                  real_square_size_m=0.10,
                  camera_height_m=1.5):
         """
-        Initialize GPU-Optimized Rust Detector with Immediate Capture and XYZ Analysis
+        Initialize Rust Detector with Immediate Capture and XYZ Analysis
         """
         self.WARP_SIZE = 300
         self.FRAME_SIZE = (640, 480)
@@ -1957,42 +1959,22 @@ class RustDetector:
         
         # Create save folder if it doesn't exist
         os.makedirs(self.save_folder, exist_ok=True)
+        print(f"[Rust] Save folder created: {self.save_folder}")
         
-        # GPU setup
-        self.device = gpu_manager.device
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.class_colors = {1: (0, 255, 0), 2: (0, 255, 255), 3: (0, 0, 255)}
         
-        # GPU-optimized transforms
-        self.transform = T.Compose([
-            T.Resize((512, 512)), 
-            T.ToTensor()
-        ])
+        self.transform = T.Compose([T.Resize((512, 512)), T.ToTensor()])
         
-        # Load model with GPU optimization
+        # Load model
         self.model = models.deeplabv3_resnet50(weights=None, num_classes=self.NUM_CLASSES)
-        
-        # Load weights with proper device handling
-        if gpu_manager.cuda_available:
-            try:
-                checkpoint = torch.load(model_path, map_location=self.device)
-                self.model.load_state_dict(checkpoint)
-                print(f"[Rust] Model loaded on GPU: {self.device}")
-            except Exception as e:
-                print(f"[Rust] GPU loading failed: {e}, trying CPU")
-                checkpoint = torch.load(model_path, map_location='cpu')
-                self.model.load_state_dict(checkpoint)
-        else:
-            checkpoint = torch.load(model_path, map_location='cpu')
-            self.model.load_state_dict(checkpoint)
-        
-        # Optimize model for inference
-        self.model = gpu_manager.optimize_model(self.model)
-        self.model.eval()
+        self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+        self.model.eval().to(self.device)
         
         # State variables
         self.captured_square = None
         self.captured_original = None
-        self.results_data: List[CorrosionData] = []
+        self.results_data = []
         self.current_display = None
         self.existing_analyses = set()
         self.position_data = None
@@ -2000,24 +1982,24 @@ class RustDetector:
         
         # Frame quality assessment - simplified
         self.frame_buffer = []
-        self.buffer_size = 5  # Reduced buffer for faster response
-        self.blur_threshold = 80  # Lowered threshold for easier capture
+        self.buffer_size = 5
+        self.blur_threshold = 80
         self.detection_frames = 0
         
         # Auto capture variables - simplified
         self.stable_frame_start_time = None
         self.last_capture_time = 0
-        self.capture_cooldown = 0.5  # Reduced cooldown
+        self.capture_cooldown = 0.5
         
         # Detection tracking for stabilization - simplified
         self.detection_count = {}
         self.saved_rust_objects = set()
-        self.STABILIZATION_FRAMES = 2  # Reduced stabilization frames
+        self.STABILIZATION_FRAMES = 0.2
         
         # Load existing analysis data
         self._load_existing_analyses()
         
-        logger.info(f"GPU-Optimized Rust Detector initialized - Direct capture to: {self.save_folder}")
+        logger.info(f"Rust Detector initialized - Direct capture to: {self.save_folder}")
     
     def _load_existing_analyses(self):
         """Load existing analysis data from file"""
@@ -2059,18 +2041,16 @@ class RustDetector:
             analysis_str += ", CRITICAL"
         return analysis_str in self.existing_analyses
     
-    def _calculate_position(self, square_points: np.ndarray, frame_shape: tuple) -> PositionData:
-        """Calculate position in METERS from ground level (GPU optimized)"""
+    def _calculate_position(self, square_points, frame_shape):
+        """Calculate position in METERS from ground level"""
         points = square_points.reshape(4, 2)
         center_x = np.mean(points[:, 0])
         center_y = np.mean(points[:, 1])
         
-        # Calculate square size in pixels using vectorized operations
-        side_lengths = [
-            np.linalg.norm(points[1] - points[0]),
-            np.linalg.norm(points[2] - points[1])
-        ]
-        square_size_pixels = np.mean(side_lengths)
+        # Calculate square size in pixels
+        side1_length = np.linalg.norm(points[1] - points[0])
+        side2_length = np.linalg.norm(points[2] - points[1])
+        square_size_pixels = (side1_length + side2_length) / 2
         
         # X: Distance calculation
         x_distance_m = (self.real_square_size_m * self.camera_focal_length) / square_size_pixels
@@ -2105,14 +2085,14 @@ class RustDetector:
         self.camera_center_x = width / 2
         self.camera_center_y = height / 2
     
-    def create_object_id(self, square_points: np.ndarray) -> str:
+    def create_object_id(self, square_points):
         """Create unique object ID for rust detection"""
         points = square_points.reshape(4, 2)
         center_x = int(np.mean(points[:, 0]))
         center_y = int(np.mean(points[:, 1]))
         return f"rust_{center_x//50}_{center_y//50}"
 
-    def process_frame(self, frame: np.ndarray) -> dict:
+    def process_frame(self, frame):
         current_time = time.time()
         self.update_frame_dimensions(frame.shape[1], frame.shape[0])
         square_points = self._detect_square(frame)
@@ -2120,32 +2100,25 @@ class RustDetector:
         if square_points is not None:
             self.detection_frames += 1
             
-            # Calculate position data immediately
             self.position_data = self._calculate_position(square_points, frame.shape)
             
-            # Create object ID for tracking
             object_id = self.create_object_id(square_points)
             
             if object_id not in self.detection_count:
                 self.detection_count[object_id] = 0
             self.detection_count[object_id] += 1
             
-            # GPU-optimized frame quality check
             is_stable = self._is_frame_stable_simple(frame, square_points)
             
-            # Show detection with clean visualization (no center lines)
             status_frame = frame.copy()
             cv2.drawContours(status_frame, [square_points], -1, (0, 255, 0), 2)
             
-            # Add simple position text overlay (no lines)
             self._add_simple_position_text(status_frame, self.position_data)
             
             if is_stable and (current_time - self.last_capture_time >= self.capture_cooldown):
-                # Immediate capture if stabilized
                 if (self.detection_count[object_id] >= self.STABILIZATION_FRAMES and
                     object_id not in self.saved_rust_objects):
                     
-                    # GPU-optimized perspective transform
                     rect = self._order_points(square_points.reshape(4, 2))
                     M = cv2.getPerspectiveTransform(
                         np.float32(rect),
@@ -2156,27 +2129,23 @@ class RustDetector:
                     self.captured_square = cv2.warpPerspective(frame, M, (self.WARP_SIZE, self.WARP_SIZE))
                     self.captured_original = frame.copy()
                     
-                    # GPU-optimized rust/corrosion processing
                     rust_img, clean_img = self._process_corrosion()
                     self.current_display = self._create_display(rust_img, clean_img)
                     
-                    # Auto save immediately
                     save_result = self._auto_save_analysis()
                     if save_result['success']:
                         status_text = "RUST CAPTURED & SAVED!"
                         status_color = (0, 255, 0)
-                        logger.info(f"✅ RUST GPU IMMEDIATE CAPTURE: {save_result['message']}")
+                        logger.info(f"RUST CAPTURE: {save_result['message']}")
                     else:
                         status_text = "RUST CAPTURED (Save failed)"
                         status_color = (0, 165, 255)
-                        logger.warning(f"❌ RUST GPU SAVE FAILED: {save_result['message']}")
+                        logger.warning(f"RUST SAVE FAILED: {save_result['message']}")
                     
-                    # Mark as saved and update timing
                     self.saved_rust_objects.add(object_id)
                     self.last_capture_time = current_time
                     self.capture_count += 1
                     
-                    # Clear tracking
                     self.frame_buffer.clear()
                     self.detection_frames = 0
                     
@@ -2184,10 +2153,6 @@ class RustDetector:
                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, status_color, 2)
                     cv2.putText(status_frame, f"SAVED #{self.capture_count}", (10, 50), 
                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
-                    
-                    # GPU memory cleanup
-                    if self.capture_count % 10 == 0:
-                        gpu_manager.cleanup_memory()
                     
                     return {
                         'main_frame': status_frame,
@@ -2197,11 +2162,9 @@ class RustDetector:
                         'position_data': self.position_data
                     }
                 else:
-                    # Still stabilizing
                     status_text = f"RUST DETECTED - Stabilizing {self.detection_count[object_id]}/{self.STABILIZATION_FRAMES}"
                     status_color = (0, 255, 255)
             else:
-                # Not stable enough or in cooldown
                 if current_time - self.last_capture_time < self.capture_cooldown:
                     remaining_time = self.capture_cooldown - (current_time - self.last_capture_time)
                     status_text = f"COOLDOWN: {remaining_time:.1f}s"
@@ -2213,11 +2176,6 @@ class RustDetector:
             cv2.putText(status_frame, status_text, (10, 25), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, status_color, 2)
             
-            # Add GPU status indicator
-            if gpu_manager.cuda_available:
-                cv2.putText(status_frame, "GPU: ON", (10, status_frame.shape[0] - 15), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 255, 0), 1)
-            
             return {
                 'main_frame': status_frame,
                 'analysis_frame': self.current_display,
@@ -2226,18 +2184,15 @@ class RustDetector:
                 'position_data': self.position_data
             }
         else:
-            # No square detected - reset all
             self.detection_frames = 0
             self.frame_buffer.clear()
             self.position_data = None
             
-            # Clean up detection tracking
             objects_to_remove = list(self.detection_count.keys())
             for obj_id in objects_to_remove:
                 del self.detection_count[obj_id]
                 self.saved_rust_objects.discard(obj_id)
             
-            # Simple live feed message
             live_frame = frame.copy()
             cv2.putText(live_frame, "SCANNING FOR RUST", 
                        (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
@@ -2250,15 +2205,12 @@ class RustDetector:
                 'position_data': None
             }
     
-    def _add_simple_position_text(self, frame: np.ndarray, position_data: PositionData):
-        """Add simple position text without lines (GPU optimized)"""
+    def _add_simple_position_text(self, frame, position_data):
+        """Add simple position text without lines"""
         if not position_data:
             return
             
-        overlay_frame = frame
-        h, w = overlay_frame.shape[:2]
-        
-        # Simple text info in bottom-left
+        h, w = frame.shape[:2]
         y_direction = "Right" if position_data.y_distance_m > 0 else "Left"
         
         info_lines = [
@@ -2267,14 +2219,13 @@ class RustDetector:
             f"Z: {position_data.z_height_ground_m:.2f}m"
         ]
         
-        # Simple text overlay without background
         for i, line in enumerate(info_lines):
             y_pos = h - 60 + (i * 20)
-            cv2.putText(overlay_frame, line, (10, y_pos),
+            cv2.putText(frame, line, (10, y_pos),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
     
-    def _is_frame_stable_simple(self, frame: np.ndarray, square_points: np.ndarray) -> bool:
-        """GPU-optimized stability check for faster response"""
+    def _is_frame_stable_simple(self, frame, square_points):
+        """Simplified stability check"""
         sharpness = self._calculate_frame_sharpness(frame)
         
         frame_info = {
@@ -2288,47 +2239,18 @@ class RustDetector:
         if len(self.frame_buffer) > self.buffer_size:
             self.frame_buffer.pop(0)
         
-        # Relaxed stability requirements
-        if len(self.frame_buffer) < 3:  # Reduced requirement
+        if len(self.frame_buffer) < 3:
             return False
         
-        return sharpness >= self.blur_threshold  # Simple sharpness check
+        return sharpness >= self.blur_threshold
     
-    def _calculate_frame_sharpness(self, frame: np.ndarray) -> float:
-        """GPU-optimized frame sharpness calculation"""
-        if gpu_manager.cuda_available and frame.shape[0] * frame.shape[1] > 200000:
-            try:
-                # Use GPU for large frames
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                gray_gpu = torch.from_numpy(gray).float().to(self.device) / 255.0
-                
-                # GPU Laplacian kernel
-                laplacian_kernel = torch.tensor([
-                    [0, 1, 0],
-                    [1, -4, 1], 
-                    [0, 1, 0]
-                ], dtype=torch.float32, device=self.device).unsqueeze(0).unsqueeze(0)
-                
-                gray_batch = gray_gpu.unsqueeze(0).unsqueeze(0)
-                laplacian_gpu = torch.nn.functional.conv2d(gray_batch, laplacian_kernel, padding=1)
-                
-                variance = torch.var(laplacian_gpu).item()
-                
-                # Cleanup GPU memory
-                del gray_gpu, laplacian_gpu, gray_batch
-                torch.cuda.empty_cache()
-                
-                return variance * 1000  # Scale for compatibility
-            except:
-                # Fallback to CPU
-                pass
-        
-        # CPU fallback
+    def _calculate_frame_sharpness(self, frame):
+        """Calculate frame sharpness"""
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         laplacian = cv2.Laplacian(gray, cv2.CV_64F)
         return laplacian.var()
     
-    def _detect_square(self, frame: np.ndarray) -> Optional[np.ndarray]:
+    def _detect_square(self, frame):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         blurred = cv2.GaussianBlur(gray, (5, 5), 0)
         edges = cv2.Canny(blurred, 50, 150)
@@ -2344,43 +2266,23 @@ class RustDetector:
                     return approx
         return None
     
-    def _process_corrosion(self) -> Tuple[np.ndarray, np.ndarray]:
-        """GPU-optimized corrosion processing"""
+    def _process_corrosion(self):
         self.results_data.clear()
         overlayed = self.captured_square.copy()
         clean = self.captured_square.copy()
         
-        # GPU-optimized inference
         image_pil = Image.fromarray(cv2.cvtColor(self.captured_square, cv2.COLOR_BGR2RGB))
-        input_tensor = self.transform(image_pil).unsqueeze(0)
-        
-        # Move to GPU if available
-        if gpu_manager.cuda_available:
-            input_tensor = input_tensor.to(self.device)
-            if hasattr(self.model, 'half') and self.model.training == False:
-                input_tensor = input_tensor.half()
+        input_tensor = self.transform(image_pil).unsqueeze(0).to(self.device)
         
         with torch.no_grad():
             output = self.model(input_tensor)['out']
-            
-            # Handle GPU/CPU tensor properly
-            if output.is_cuda:
-                mask = torch.argmax(output.squeeze(), dim=0).cpu().numpy().astype(np.uint8)
-            else:
-                mask = torch.argmax(output.squeeze(), dim=0).numpy().astype(np.uint8)
-        
-        # GPU memory cleanup
-        del input_tensor, output
-        if gpu_manager.cuda_available:
-            torch.cuda.empty_cache()
+            mask = torch.argmax(output.squeeze(), dim=0).cpu().numpy().astype(np.uint8)
         
         mask_resized = cv2.resize(mask, (self.WARP_SIZE, self.WARP_SIZE), interpolation=cv2.INTER_NEAREST)
         
-        # Apply mask
         for class_id, color in self.class_colors.items():
             overlayed[mask_resized == class_id] = color
         
-        # Extract measurements
         self.results_data.extend(self._extract_measurements(mask_resized))
         
         cv2.rectangle(overlayed, (0, 0), (self.WARP_SIZE-1, self.WARP_SIZE-1), (0, 255, 0), 3)
@@ -2388,18 +2290,13 @@ class RustDetector:
         
         return overlayed, clean
     
-    def _extract_measurements(self, mask: np.ndarray) -> List[CorrosionData]:
-        """GPU-optimized measurement extraction"""
+    def _extract_measurements(self, mask):
         total_pixels = mask.shape[0] * mask.shape[1]
         severity_percentages = {}
         total_affected = 0
         
-        # Vectorized pixel counting
-        unique, counts = np.unique(mask, return_counts=True)
-        pixel_counts = dict(zip(unique, counts))
-        
         for class_id in range(1, self.NUM_CLASSES):
-            count = pixel_counts.get(class_id, 0)
+            count = np.sum(mask == class_id)
             percentage = (count / total_pixels) * 100
             if percentage > 0.1:
                 severity_percentages[class_id] = percentage
@@ -2411,7 +2308,7 @@ class RustDetector:
         total_affected_percentage = (total_affected / total_pixels) * 100
         return [CorrosionData(severity_percentages, total_affected_percentage)]
     
-    def _create_display(self, corrosion_img: np.ndarray, clean_img: np.ndarray) -> np.ndarray:
+    def _create_display(self, corrosion_img, clean_img):
         h, w = corrosion_img.shape[:2]
         margin, gap = 50, 50
         combined = np.ones((h + 2 * margin, margin + w + gap + w + margin, 3), dtype=np.uint8) * 255
@@ -2420,22 +2317,15 @@ class RustDetector:
         right_start = margin + w + gap
         combined[margin:margin + h, right_start:right_start + w] = clean_img
         
-        # Add GPU status
-        cv2.putText(combined, f"GPU ACCELERATION: {'ENABLED' if gpu_manager.cuda_available else 'DISABLED'}", 
-                   (margin, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0) if gpu_manager.cuda_available else (128, 128, 128), 1)
-        
-        # Add simplified annotations with position data
         if self.results_data:
             corrosion = self.results_data[0]
             
-            # Header info with position
             info_text = f"Total Rust: {corrosion.total_affected_percentage:.1f}% | {corrosion.dominant_class}"
             if corrosion.is_critical:
                 info_text += " | CRITICAL"
-            cv2.putText(combined, info_text, (margin, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 
+            cv2.putText(combined, info_text, (margin, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 
                        (255, 0, 0) if corrosion.is_critical else (0, 0, 0), 1)
             
-            # Position data
             if self.position_data:
                 pos_text = f"Position: {self.position_data}"
                 cv2.putText(combined, pos_text, (margin, h + margin + 50), 
@@ -2443,14 +2333,14 @@ class RustDetector:
         
         return combined
     
-    def _order_points(self, pts: np.ndarray) -> np.ndarray:
+    def _order_points(self, pts):
         rect = np.zeros((4, 2), dtype="float32")
         s = pts.sum(axis=1)
         d = np.diff(pts, axis=1).flatten()
-        rect[0] = pts[np.argmin(s)]    # top-left
-        rect[1] = pts[np.argmin(d)]    # top-right  
-        rect[2] = pts[np.argmax(s)]    # bottom-right
-        rect[3] = pts[np.argmax(d)]    # bottom-left
+        rect[0] = pts[np.argmin(s)]
+        rect[1] = pts[np.argmin(d)]
+        rect[2] = pts[np.argmax(s)]
+        rect[3] = pts[np.argmax(d)]
         return rect
     
     def _auto_save_analysis(self):
@@ -2467,28 +2357,23 @@ class RustDetector:
             files_saved = []
             analysis_data_saved = False
             
-            # Save analysis data if it's new
             if self.results_data and not self._analysis_exists(self.results_data[0]):
                 if self._save_analysis_data(self.results_data[0]):
                     analysis_data_saved = True
             
-            # Save the analysis display
             if self.current_display is not None:
                 analysis_path = os.path.join(self.save_folder, f"rust_analysis_{timestamp}.jpg")
                 cv2.imwrite(analysis_path, self.current_display)
                 files_saved.append(analysis_path)
+                print(f"[Rust] Saved: {analysis_path}")
             
-            # Create detailed analysis summary with GPU and XYZ position data
             if self.results_data:
                 corrosion = self.results_data[0]
                 summary_path = os.path.join(self.save_folder, f"rust_report_{timestamp}.txt")
                 with open(summary_path, 'w', encoding='utf-8') as f:
-                    f.write(f"Rust/Corrosion Analysis Report (GPU Optimized) - {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"Rust/Corrosion Analysis Report - {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                     f.write(f"{'='*60}\n")
-                    f.write(f"GPU Acceleration: {'ENABLED' if gpu_manager.cuda_available else 'DISABLED'}\n")
-                    f.write(f"GPU Device: {gpu_manager.device}\n")
                     
-                    # Rust analysis
                     f.write(f"RUST/CORROSION ANALYSIS:\n")
                     f.write(f"Total Affected: {corrosion.total_affected_percentage:.1f}%\n")
                     f.write(f"Dominant Class: {corrosion.dominant_class}\n")
@@ -2499,25 +2384,16 @@ class RustDetector:
                     for class_id, percentage in corrosion.severity_percentages.items():
                         f.write(f"  {class_names[class_id]}: {percentage:.1f}%\n")
                     
-                    # XYZ Position data in METERS
                     if self.position_data:
-                        f.write(f"\nXYZ POSITION ANALYSIS (METERS from ground level):\n")
-                        f.write(f"X (Distance from Camera): {self.position_data.x_distance_m:.3f} m\n")
-                        f.write(f"Y (Horizontal Position): {self.position_data.y_distance_m:.3f} m ({'Right' if self.position_data.y_distance_m > 0 else 'Left' if self.position_data.y_distance_m < 0 else 'Center'})\n")
-                        f.write(f"Z (Height from Ground): {self.position_data.z_height_ground_m:.3f} m\n")
-                        f.write(f"Camera Height: {self.camera_height_m:.3f} m (above ground)\n")
-                        f.write(f"Detected Square Size: {self.position_data.square_size_m:.3f} m\n")
-                        f.write(f"Horizontal Angle: {self.position_data.angle_horizontal:.1f}°\n")
-                        f.write(f"Vertical Angle: {self.position_data.angle_vertical:.1f}°\n")
-                
-                f.write(f"\nCAPTURE INFO:\n")
-                f.write(f"Capture Method: GPU-Optimized Immediate Detection\n")
-                f.write(f"Analysis Status: {'New (auto saved)' if analysis_data_saved else 'Already exists'}\n")
-                f.write(f"Files Saved: {len(files_saved)}\n")
+                        f.write(f"\nXYZ POSITION (METERS from ground):\n")
+                        f.write(f"X (Distance): {self.position_data.x_distance_m:.3f} m\n")
+                        f.write(f"Y (Horizontal): {self.position_data.y_distance_m:.3f} m\n")
+                        f.write(f"Z (Height): {self.position_data.z_height_ground_m:.3f} m\n")
                 
                 files_saved.append(summary_path)
+                print(f"[Rust] Analytics: {summary_path}")
             
-            message = f"GPU-optimized immediate capture saved {len(files_saved)} rust files with XYZ data to {self.save_folder}"
+            message = f"Saved {len(files_saved)} files to {self.save_folder}"
             if analysis_data_saved:
                 message += " (new analysis)"
             
@@ -2529,14 +2405,15 @@ class RustDetector:
             }
             
         except Exception as e:
+            print(f"[Rust] Save error: {e}")
             return {
                 'success': False,
-                'message': f"Error saving rust analysis: {e}",
+                'message': f"Error saving: {e}",
                 'files_saved': [],
                 'analysis_data_saved': False
             }
     
-    def get_capture_count(self) -> int:
+    def get_capture_count(self):
         return self.capture_count
 
 # ============================================================================
@@ -2544,7 +2421,7 @@ class RustDetector:
 # ============================================================================
 
 class HazmatDetector:
-    def __init__(self, model_path="models/hazmat.pt"):
+    def __init__(self, model_path="hazmat.pt"):
         # GPU-optimized YOLO model loading
         self.device = gpu_manager.device
         self.model = YOLO(model_path)
@@ -4149,8 +4026,8 @@ class MotionDetector:
 # ============================================================================
 
 class AIDetectionController:
-    def __init__(self, crack_weights='models/crack.pt', hazmat_weights='models/hazmat.pt', 
-                 rust_model_path='models/deeplabv3_corrosion_multiclass.pth', camera_index=0):
+    def __init__(self, crack_weights='crack.pt', hazmat_weights='hazmat.pt', 
+                 rust_model_path='deeplabv3_corrosion_multiclass.pth', camera_index=0):
         self.camera_index = camera_index
         self.cap = None
         
@@ -5081,7 +4958,7 @@ class AIDetectionController:
         if self.cap:
             self.cap.release()
             
-        # cv2.destroyAllWindows()
+        cv2.destroyAllWindows()
         
         # GPU memory cleanup
         if self.gpu_manager.cuda_available:
@@ -5105,9 +4982,9 @@ class AIDetectionController:
 
 
 def main():
-    CRACK_WEIGHTS = "models/crack.pt"
-    HAZMAT_WEIGHTS = "models/hazmat.pt"
-    RUST_MODEL_PATH = "models/deeplabv3_corrosion_multiclass.pth"
+    CRACK_WEIGHTS = "crack.pt"
+    HAZMAT_WEIGHTS = "hazmat.pt"
+    RUST_MODEL_PATH = "deeplabv3_corrosion_multiclass.pth"
     CAMERA_INDEX = 0
     
     print("GPU-OPTIMIZED AI Detection Controller with Landolt Ring Detection")
@@ -5152,6 +5029,45 @@ def main():
     print(f"   - Motion Detection: Main view only (No Analysis) ✓")
     print(f"   - Rust Detection: Main view + Analysis view {'✓' if os.path.exists(RUST_MODEL_PATH) else '✗'}")
     print(f"   - Camera Index: {CAMERA_INDEX}")
+    print()
+    
+    print("GPU Analysis View Policy:")
+    print("   - RUST: Analysis window akan muncul dengan detail XYZ coordinates + GPU acceleration")
+    print("   - CRACK/HAZMAT/QR/LANDOLT/MOTION: Hanya main window, tidak ada analysis window + GPU acceleration")
+    print("   - File tersimpan sesuai dengan jenis detection")
+    print("   - Landolt Ring detector menyimpan data XYZ coordinates dan OCR ID + GPU optimization")
+    print("   - Motion detector menyimpan data rotasi dan posisi XYZ + GPU optimization")
+    print("   - All image processing operations optimized for GPU when available")
+    print()
+    
+    print("GPU Detection Priority Order:")
+    print("   1. HAZMAT (Highest - Safety Priority) - No Analysis + GPU Optimized")
+    print("   2. QR CODE (High - Information Priority) - No Analysis + GPU Optimized")
+    print("   3. LANDOLT RING (High - Medical/Vision Testing Priority) - No Analysis + GPU Optimized")
+    print("   4. MOTION (Medium-High - Movement Priority) - No Analysis + GPU Optimized")
+    print("   5. RUST (Medium - Corrosion Priority) - WITH Analysis + GPU Optimized")
+    print("   6. CRACK (Lower - Structural Priority) - No Analysis + GPU Optimized")
+    print("   7. STANDBY (No active detections)")
+    print()
+    
+    print("GPU-Optimized Output Directories:")
+    print("   - Crack captures: ai_crack_captures/ (No Analysis + GPU)")
+    print("   - Hazmat images: ai_hazmat_images/ (No Analysis + GPU)")
+    print("   - Hazmat analytics: ai_hazmat_analytics/ (No Analysis + GPU)")
+    print("   - QR captures: ai_qr_captures/ (No Analysis + GPU)")
+    print("   - Landolt captures: ai_landolt_captures/ (No Analysis + GPU)")
+    print("   - Motion captures: ai_motion_captures/ (No Analysis + GPU)")
+    print("   - Rust captures: ai_rust_captures/ (WITH Analysis + GPU)")
+    print()
+    
+    print("GPU Optimization Features:")
+    print("   - GPU-accelerated image preprocessing")
+    print("   - GPU-optimized YOLO inference")
+    print("   - GPU-accelerated tensor operations")
+    print("   - Intelligent GPU memory management")
+    print("   - Automatic fallback to CPU if GPU fails")
+    print("   - Frame-by-frame GPU memory cleanup")
+    print("   - Vectorized mathematical operations")
     print()
     
     controller = AIDetectionController(

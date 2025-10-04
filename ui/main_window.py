@@ -1,15 +1,14 @@
 """
-main_window.py (FIXED VERSION with GStreamer Video Integration)
+main_window.py (FIXED VERSION - AI Disabled, Focus on Video Stream)
 
-Drone Control Center Main Window dengan integrasi telemetry yang bersih
+Drone Control Center Main Window
 """
 
 import sys
 import time
 import threading
-from ai.detection_system import AIDetectionSystem
 from pathlib import Path
-from PyQt5.QtWidgets import QMainWindow, QApplication, QLabel
+from PyQt5.QtWidgets import QMainWindow, QApplication, QLabel, QTableWidgetItem, QPushButton, QCheckBox
 from PyQt5.QtCore import QTimer, Qt
 
 # Import UI yang sudah dibuat
@@ -20,9 +19,7 @@ from config.settings import (
     APP_CONFIG, UI_CONFIG, ASSET_PATHS, NETWORK_CONFIG, FILE_PATHS
 )
 from .widgets.point_cloud_widget import SmoothPointCloudWidget
-
-from .widgets.video_stream_widget import RTSPStreamWidget, TCPVideoStreamWidget
-
+from .widgets.video_stream_widget import RTSPStreamWidget, TCPVideoStreamWidget, VideoStreamWidget
 from .widgets.joystick_dialog import JoystickDialog
 from core.tcp_receiver import TCPDataReceiver, TCPServerThread
 from core.websocket_client import WebSocketCommandClient, WebSocketCommandThread
@@ -53,22 +50,6 @@ class DroneControlMainWindow(QMainWindow):
         # Initialize communication components
         self.setup_communication()
         
-        # initialize AI Detection
-        self.ai_system = AIDetectionSystem(
-            crack_weights='models/crack.pt',
-            hazmat_weights='models/hazmat.pt',
-            rust_model_path='models/deeplabv3_corrosion_multiclass.pth'
-        )
-        
-        self.imgDetector = self.ui.imgDetector   
-        self.imgCapture = self.ui.imgCapture
-        
-        # Setup AI detection display labels
-        self.setup_ai_detection()
-        
-        # Connect AI signals
-        self.connect_ai_signals()
-        
         # Replace placeholder labels dengan functional widgets
         self.setup_functional_widgets()
         
@@ -83,166 +64,6 @@ class DroneControlMainWindow(QMainWindow):
         
         # Update asset paths untuk menggunakan path yang benar
         self.update_asset_paths()
-    
-    def setup_ai_detection(self):
-        """Setup AI detection display for 3 cameras"""
-        # Main Camera - akan ditampilkan di SwitchView yang aktif
-        # Tidak perlu setup di sini karena sudah dihandle di setup_functional_widgets()
-        
-        # Camera 1 - imgDetector
-        self.imgDetector.setScaledContents(True)
-        self.imgDetector.setStyleSheet("border: 2px solid #00ff00; background-color: #000000;")
-        self.imgDetector.setText("Camera 1\nAI Detection\nWaiting...")
-        self.imgDetector.setAlignment(Qt.AlignCenter)
-        
-        # Camera 2 - imgCapture  
-        self.imgCapture.setScaledContents(True)
-        self.imgCapture.setStyleSheet("border: 2px solid #0000ff; background-color: #000000;")
-        self.imgCapture.setText("Camera 2\nAI Detection\nWaiting...")
-        self.imgCapture.setAlignment(Qt.AlignCenter)
-    
-    def connect_ai_signals(self):
-        """Connect AI detection signals for 3 cameras"""
-        # Connect main camera - tampil di video_stream widget yang sudah ada
-        self.ai_system.main_camera_frame_ready.connect(self.update_main_camera_display)
-        
-        # Connect camera 1 - tampil di imgDetector
-        self.ai_system.camera1_frame_ready.connect(self.update_camera1_display)
-        
-        # Connect camera 2 - tampil di imgCapture
-        self.ai_system.camera2_frame_ready.connect(self.update_camera2_display)
-        
-        # Connect status signals
-        self.ai_system.detection_status.connect(self.update_ai_status)
-        self.ai_system.mode_changed.connect(self.on_ai_mode_changed)
-    
-    def update_main_camera_display(self, frame):
-        """Update Main Camera display (di video_stream widget)"""
-        try:
-            # Main camera sudah ditampilkan di video_stream widget
-            # Tapi kita perlu update dengan frame yang sudah di-detect AI
-            pixmap = AIDetectionSystem.numpy_to_qpixmap(frame)
-            if not pixmap.isNull() and hasattr(self, 'video_stream'):
-                # Update video_stream display dengan AI processed frame
-                # Implementasi tergantung video_stream_widget
-                pass
-        except Exception as e:
-            print(f"Error updating main camera display: {e}")
-
-    def update_camera1_display(self, frame):
-        """Update Camera 1 display (imgDetector)"""
-        try:
-            pixmap = AIDetectionSystem.numpy_to_qpixmap(frame)
-            if not pixmap.isNull():
-                scaled_pixmap = pixmap.scaled(
-                    self.imgDetector.size(),
-                    Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation
-                )
-                self.imgDetector.setPixmap(scaled_pixmap)
-        except Exception as e:
-            print(f"Error updating camera 1: {e}")
-
-    def update_camera2_display(self, frame):
-        """Update Camera 2 display (imgCapture)"""
-        try:
-            pixmap = AIDetectionSystem.numpy_to_qpixmap(frame)
-            if not pixmap.isNull():
-                scaled_pixmap = pixmap.scaled(
-                    self.imgCapture.size(),
-                    Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation
-                )
-                self.imgCapture.setPixmap(scaled_pixmap)
-        except Exception as e:
-            print(f"Error updating camera 2: {e}")
-        
-    def start_ai_detection_from_video(self):
-        """Start AI detection for all 3 cameras"""
-        if hasattr(self, 'video_stream'):
-            # Timer untuk feed frames dari semua camera
-            self.camera_feed_timer = QTimer()
-            self.camera_feed_timer.timeout.connect(self.feed_all_cameras_to_ai)
-            self.camera_feed_timer.start(30)  # 30ms = ~33 FPS
-            
-            # Start AI processing
-            self.ai_system.start()
-            
-            self.log_debug("AI Detection started for all 3 cameras")        
-    
-    def update_detection_display(self, frame):
-        """Update imgDetector QLabel with processed detection frame"""
-        try:
-            pixmap = AIDetectionSystem.numpy_to_qpixmap(frame)
-            
-            if not pixmap.isNull():
-                # Scale pixmap to fit label while maintaining aspect ratio
-                scaled_pixmap = pixmap.scaled(
-                    self.imgDetector.size(),
-                    Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation
-                )
-                self.imgDetector.setPixmap(scaled_pixmap)
-        except Exception as e:
-            print(f"Error updating detection display: {e}")
-            
-    def update_capture_display(self, frame):
-        """Update imgCapture QLabel with captured image"""
-        try:
-            pixmap = AIDetectionSystem.numpy_to_qpixmap(frame)
-            
-            if not pixmap.isNull():
-                scaled_pixmap = pixmap.scaled(
-                    self.imgCapture.size(),
-                    Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation
-                )
-                self.imgCapture.setPixmap(scaled_pixmap)
-        except Exception as e:
-            print(f"Error updating capture display: {e}")
-    
-    def update_ai_status(self, status: str):
-        """Update AI detection status in UI"""
-        self.log_debug(f"AI Status: {status}")
-    
-    def on_ai_mode_changed(self, mode: str):
-        """Handle AI detection mode change"""
-        self.log_debug(f"AI Mode: {mode}")
-    
-    def feed_all_cameras_to_ai(self):
-        """Feed all 3 camera frames to AI detection system"""
-        try:
-            if hasattr(self, 'video_stream'):
-                # Get frames from video_stream widget
-                # Implementasi tergantung bagaimana video_stream mengelola 3 cameras
-                
-                # Contoh jika video_stream punya method get_frames():
-                frames = self.video_stream.get_all_frames()
-                
-                if frames:
-                    # Main camera (RTSP)
-                    if 'main' in frames and frames['main'] is not None:
-                        self.ai_system.update_frame('main', frames['main'])
-                    
-                    # Camera 1 (base1)
-                    if 'camera1' in frames and frames['camera1'] is not None:
-                        self.ai_system.update_frame('camera1', frames['camera1'])
-                    
-                    # Camera 2 (base2)
-                    if 'camera2' in frames and frames['camera2'] is not None:
-                        self.ai_system.update_frame('camera2', frames['camera2'])
-                        
-        except Exception as e:
-            print(f"Error feeding cameras to AI: {e}")
-    
-    
-    def toggle_ai_detection_mode(self, mode_name: str):
-        """Toggle AI detection mode"""
-        if mode_name in AIDetectionSystem.MODES.values():
-            self.ai_system.set_mode(mode_name)
-        else:
-            print(f"Unknown AI mode: {mode_name}")
-            
             
     def setup_communication(self):
         """Initialize communication components with UDP telemetry handler."""
@@ -293,33 +114,52 @@ class DroneControlMainWindow(QMainWindow):
     def setup_functional_widgets(self):
         """Replace placeholder labels dengan functional widgets."""
         
-        # Replace SwitchView_1 dengan main point cloud widget
+        # Main point cloud widget
         self.main_point_cloud = SmoothPointCloudWidget()
         self.main_point_cloud.setParent(self.ui.centralwidget)
         self.main_point_cloud.setGeometry(self.ui.SwitchView_1.geometry())
         self.main_point_cloud.setStyleSheet(self.ui.SwitchView_1.styleSheet())
-        self.ui.SwitchView_1.hide()  # Hide original label
-  
-        self.video_stream = RTSPStreamWidget(
-            rtsp_url="rtsp://192.168.1.99:1234",
-            rtsp_url_cam1="rtsp://localhost:8554/camera1",  # Via MediaMTX
-            rtsp_url_cam2="rtsp://localhost:8554/camera2",  # Via MediaMTX
-            width_scale=0.5,
-            height_scale=0.5
-        )
+        self.ui.SwitchView_1.hide()
+      
+        # Main video stream (Camera utama)
+        self.video_stream = RTSPStreamWidget()
         self.video_stream.setParent(self.ui.frame_8)
         self.video_stream.setGeometry(self.ui.SwitchView_2.geometry())
         self.video_stream.setStyleSheet(self.ui.SwitchView_2.styleSheet())
-        self.ui.SwitchView_2.hide()  # Hide original label
+        self.ui.SwitchView_2.hide()
+        
+        # ========================================
+        # TAMBAHKAN: Camera 1 Display Widget
+        # ========================================
+        # Asumsikan imgDetector adalah QLabel untuk Camera 1
+        if hasattr(self.ui, 'imgDetector'):
+            # Buat widget khusus untuk Camera 1
+            from .widgets.video_stream_widget import VideoStreamWidget
+            self.camera1_widget = VideoStreamWidget()
+            self.camera1_widget.setParent(self.ui.imgDetector.parent())
+            self.camera1_widget.setGeometry(self.ui.imgDetector.geometry())
+            self.camera1_widget.setStyleSheet(self.ui.imgDetector.styleSheet())
+            self.ui.imgDetector.hide()
+        
+        # ========================================
+        # TAMBAHKAN: Camera 2 Display Widget
+        # ========================================
+        # Asumsikan imgCapture adalah QLabel untuk Camera 2
+        if hasattr(self.ui, 'imgCapture'):
+            # Buat widget khusus untuk Camera 2
+            from .widgets.video_stream_widget import VideoStreamWidget
+            self.camera2_widget = VideoStreamWidget()
+            self.camera2_widget.setParent(self.ui.imgCapture.parent())
+            self.camera2_widget.setGeometry(self.ui.imgCapture.geometry())
+            self.camera2_widget.setStyleSheet(self.ui.imgCapture.styleSheet())
+            self.ui.imgCapture.hide()
         
         # Initially show point cloud and hide video
         self.main_point_cloud.show()
         self.video_stream.hide()
         
-        # Setup current marker untuk single command mode
+        # Setup current marker
         self.current_marker = None
-        
-        # Setup edit mode tracking
         self.edit_mode = False
     
     def update_asset_paths(self):
@@ -329,9 +169,6 @@ class DroneControlMainWindow(QMainWindow):
             (self.ui.label_62, 'compass'),
             (self.ui.label_60, 'compass'), 
             (self.ui.label_61, 'compass'),
-            # (self.ui.DroneBottomView, 'drone_bottom'),
-            # (self.ui.DroneTopView, 'drone_top'),
-            # (self.ui.DroneSideView, 'drone_display'),
             (self.ui.label, 'logo'),
             (self.ui.label_2, 'drone_display'),
             (self.ui.label_9, 'logo'),
@@ -406,7 +243,6 @@ class DroneControlMainWindow(QMainWindow):
         """Setup update timers."""
         # Status update timer
         self.status_timer = QTimer()
-        #self.status_timer.timeout.connect(self.update_status)
         self.status_timer.start(UI_CONFIG['update_intervals']['status_update'])
     
     def start_services(self):
@@ -420,38 +256,51 @@ class DroneControlMainWindow(QMainWindow):
             self.tcp_thread = TCPServerThread(self.tcp_receiver)
             self.tcp_thread.start()
     
-    def start_video_stream(self, stream_url=None, width_scale=0.5, height_scale=0.5):
+    def start_video_stream(self, stream_url=None, cam1_url=None, cam2_url=None, 
+                           width_scale=0.5, height_scale=0.5):
         """Start video streaming dengan URL yang diberikan."""
         if not stream_url:
-            stream_url = "rtsp://192.168.1.99:1234"  # Default main camera
+            stream_url = "rtsp://192.168.1.99:1234"
         if not cam1_url:
-            cam1_url = "rtsp://localhost:8554/camera1"  # Via MediaMTX
+            cam1_url = "rtsp://192.168.1.88:8555/bottom"
         if not cam2_url:
-            cam2_url = "rtsp://localhost:8554/camera2"  # Via MediaMTX
+            cam2_url = "rtsp://192.168.1.88:8554/top"
         
         try:
             success = self.video_stream.start_stream(
-            rtsp_url=stream_url,
-            rtsp_url_cam1=cam1_url,
-            rtsp_url_cam2=cam2_url,
-            width_scale=width_scale,
-            height_scale=height_scale
+                rtsp_url=stream_url,
+                cam1_url=cam1_url,
+                cam2_url=cam2_url,
+                width_scale=width_scale,
+                height_scale=height_scale
             )
             
             if success:
-                self.start_ai_detection_from_video()
-                self.log_debug(f"Video stream started: {stream_url}")
-                print(f"✅ Video stream started: {stream_url}")
-                return True
-            else:
-                self.log_debug(f"Failed to start video stream: {stream_url}")
-                print(f"❌ Failed to start video stream: {stream_url}")
-                return False
+                # ========================================
+                # CONNECT Camera 1 ke widget
+                # ========================================
+                if hasattr(self, 'camera1_widget') and "http1" in self.video_stream.cameras:
+                    self.video_stream.cameras["http1"].frame_ready.connect(
+                        self.camera1_widget.update_frame
+                    )
+                    print("✓ Camera 1 connected to display")
                 
-        except Exception as e:
-            self.log_debug(f"Error starting video stream: {e}")
-            print(f"❌ Error starting video stream: {e}")
-            return False
+                # ========================================
+                # CONNECT Camera 2 ke widget
+                # ========================================
+                if hasattr(self, 'camera2_widget') and "http2" in self.video_stream.cameras:
+                    self.video_stream.cameras["http2"].frame_ready.connect(
+                        self.camera2_widget.update_frame
+                    )
+                    print("✓ Camera 2 connected to display")
+                
+                self.log_debug(f"✓ Main camera: {stream_url}")
+                self.log_debug(f"✓ Camera 1: {cam1_url}")
+                self.log_debug(f"✓ Camera 2: {cam2_url}")
+                print(f"✅ Video streams started successfully")
+                return True
+        except:
+            pass
     
     def stop_video_stream(self):
         """Stop video streaming."""
@@ -465,16 +314,28 @@ class DroneControlMainWindow(QMainWindow):
     
     def toggle_video_stream(self):
         """Toggle video stream on/off."""
-        if hasattr(self.video_stream, 'rtsp_camera') and self.video_stream.rtsp_camera:
-            # Stream sedang berjalan, stop
+        has_active_camera = (
+            hasattr(self.video_stream, 'cameras') and 
+            len(self.video_stream.cameras) > 0
+        )
+        
+        if has_active_camera:
             self.stop_video_stream()
+            self.log_debug("Video streams stopped")
         else:
-            # Stream tidak berjalan, start
             rtsp_url = "rtsp://192.168.1.99:1234"
-            cam1_url = "rtsp://localhost:8554/camera1"  # Via MediaMTX
-            cam2_url = "rtsp://localhost:8554/camera2"  # Via MediaMTX
-            self.start_video_stream(rtsp_url, cam1_url, cam2_url)
-    
+            cam1_url = "rtsp://192.168.1.88:8555/bottom"
+            cam2_url = "rtsp://192.168.1.88:8554/top"
+            
+            self.start_video_stream(
+                stream_url=rtsp_url,
+                cam1_url=cam1_url,
+                cam2_url=cam2_url,
+                width_scale=0.5, 
+                height_scale=0.5
+            )
+            self.log_debug("Video streams started")
+
     # WebSocket methods
     def toggle_connection(self):
         """Toggle WebSocket connection."""
@@ -511,7 +372,7 @@ class DroneControlMainWindow(QMainWindow):
         else:
             print(f"Cannot send command '{command}': WebSocket not connected")
             self.log_debug(f"Cannot send '{command}': Not connected")
-            return True
+            return False
     
     def emergency_stop(self):
         """Emergency stop command."""
@@ -659,7 +520,6 @@ class DroneControlMainWindow(QMainWindow):
         for i, waypoint in enumerate(waypoints):
             pos_x, pos_y = waypoint['position']
             
-            from PyQt5.QtWidgets import QTableWidgetItem, QPushButton, QCheckBox
             self.ui.mcDisplayData.setItem(i, 0, 
                 QTableWidgetItem(f"({pos_x:.2f}, {pos_y:.2f})"))
             
@@ -844,7 +704,7 @@ class DroneControlMainWindow(QMainWindow):
         if self.current_view_mode != "pointcloud":
             self.log_debug("Cannot send waypoints: not in point cloud view")
             return
-        
+            
         try:
             waypoints = self.main_point_cloud.get_waypoints()
             added_waypoints = [wp for wp in waypoints if wp.get('added', False)]
@@ -852,21 +712,21 @@ class DroneControlMainWindow(QMainWindow):
             if len(added_waypoints) == 0:
                 self.log_debug("No waypoints to send - Add waypoints first")
                 return
-            
+                
             # Format waypoints sebagai string
             waypoints_strings = []
             for i, wp in enumerate(added_waypoints):
                 pos_x, pos_y = wp['position']
                 waypoint_str = f"[{pos_x:.2f},{pos_y:.2f},{wp['orientation']:.3f},{int(wp['yaw_enable'])},{int(wp['landing'])}]"
                 waypoints_strings.append(waypoint_str)
-            
+                
             waypoints_data_str = ",".join(waypoints_strings)
             waypoints_command = f"coordinates [{waypoints_data_str}]"
             waypoints_success = self.send_websocket_command(waypoints_command)
-            
+                
             if waypoints_success:
                 self.log_debug(f"Sent {len(waypoints_strings)} waypoints to server")
-                
+                    
                 time.sleep(0.1)  # Short delay
                 start_success = self.send_websocket_command("start")
                 if start_success:
@@ -875,107 +735,107 @@ class DroneControlMainWindow(QMainWindow):
                     self.log_debug("Failed to start mission")
             else:
                 self.log_debug("Failed to send waypoints - mission not started")
-                
+                    
         except Exception as e:
             self.log_debug(f"Error in send_multiple_commands: {e}")
             print(f"Error sending multiple commands: {e}")
-    
+        
     def send_waypoints_to_server(self):
         """Send all added waypoints ke WebSocket server."""
         try:
             waypoints = self.main_point_cloud.get_waypoints()
             added_waypoints = [wp for wp in waypoints if wp.get('added', False)]
-            
+                
             if len(added_waypoints) == 0:
                 return False
-            
+                
             waypoints_strings = []
             for wp in added_waypoints:
                 pos_x, pos_y = wp['position']
                 waypoint_str = f"[{pos_x:.2f},{pos_y:.2f},{wp['orientation']:.3f},{int(wp['yaw_enable'])},{int(wp['landing'])}]"
                 waypoints_strings.append(waypoint_str)
-            
+                
             waypoints_data_str = ",".join(waypoints_strings)
             waypoints_command = f"coordinates [{waypoints_data_str}]"
             success = self.send_websocket_command(waypoints_command)
-            
+                
             if success:
                 self.log_debug(f"Sent {len(waypoints_strings)} waypoints to server")
                 return True
             else:
                 self.log_debug(f"Failed to send waypoints to server")
                 return False
-                
+                    
         except Exception as e:
             self.log_debug(f"Error sending waypoints: {e}")
             return False
-    
+        
     def save_current_frame(self):
         """Save current point cloud frame."""
         if self.current_view_mode != "pointcloud":
             self.log_debug("Cannot save: not in point cloud view")
             return
-            
+                
         raw_points = self.main_point_cloud.raw_points
         if len(raw_points) == 0:
             self.log_debug("No frame to save")
             return
-        
+            
         import open3d as o3d
         timestamp = int(time.time())
         filename = f"pointcloud_raw_{timestamp}.ply"
-        
+            
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(raw_points)
-        
+            
         raw_heights = raw_points[:, 2]
         raw_colors = self.main_point_cloud.generate_colors(raw_heights)
         if len(raw_colors) > 0:
             pcd.colors = o3d.utility.Vector3dVector(raw_colors)
-        
+            
         o3d.io.write_point_cloud(filename, pcd)
         self.log_debug(f"Saved: {filename} ({len(raw_points)} points)")
-    
+        
     # Utility methods
     def on_orientation_dial_changed(self, value):
         """Handle orientation dial change."""
         import math
         orientation = (value / 50.0 - 1.0) * math.pi
         self.ui.mcOrientation.setText(f"{orientation:.4f} rad")
-    
+        
     def update_altitude_display(self, value=None):
         """Update slider agar sesuai dengan nilai di QLabel DroneHeight (format 0.00 meter)."""
         try:
             # Ambil teks dari QLabel
             height_text = self.ui.DroneHeight.text().strip()
-
+    
             # Jika label ada satuan 'm' atau 'meter', buang
             if height_text.endswith(" meter"):
                 height_text = height_text.replace(" meter", "").strip()
             elif height_text.endswith(" m"):
                 height_text = height_text.replace(" m", "").strip()
-
+    
             # Konversi ke float (misalnya "12.34")
             altitude = float(height_text)
-
+    
             # Ubah ke cm (slider integer)
             slider_value = int(round(altitude * 100))
-
+    
             # Update slider
             self.ui.DroneAltitude.setValue(slider_value)
-
+    
         except ValueError:
             # Kalau teks bukan angka valid, abaikan
             pass
-    
+        
     def log_debug(self, message):
         """Log message ke debugging console."""
         timestamp = time.strftime("%H:%M:%S")
         formatted_message = f"[{timestamp}] {message}"
-        
+            
         self.ui.tbDebugging.append(formatted_message)
-        
-        # Keep only last 100 lines
+            
+            # Keep only last 100 lines
         document = self.ui.tbDebugging.document()
         if document.blockCount() > 100:
             cursor = self.ui.tbDebugging.textCursor()
@@ -983,43 +843,34 @@ class DroneControlMainWindow(QMainWindow):
             cursor.select(cursor.LineUnderCursor)
             cursor.removeSelectedText()
             cursor.deleteChar()
-   
+       
     def closeEvent(self, event):
         """Clean shutdown with telemetry handler cleanup."""
         print("Shutting down Drone Control Center...")
-        
-        # Stop AI detection
-        if hasattr(self, 'ai_system'):
-            self.ai_system.stop()
-        
-        # Stop camera feed timer
-        if hasattr(self, 'camera_feed_timer'):
-            self.camera_feed_timer.stop()
-        
-        # Cleanup telemetry handler
-        if hasattr(self, 'telemetry_handler') and self.telemetry_handler:
-            self.telemetry_handler.cleanup()
- 
+                
+            # Stop video stream
         try:
             if hasattr(self, 'video_stream'):
-                self.stop_video_stream()
+                print("Stopping video streams...")
+                self.video_stream.stop_stream()  
+                time.sleep(0.5)
         except Exception as e:
             print(f"Error stopping video stream: {e}")
-        
+            
         # Stop TCP server
         if hasattr(self, 'tcp_receiver'):
             self.tcp_receiver.stop_server()
         if hasattr(self, 'tcp_thread') and self.tcp_thread:
             self.tcp_thread.quit()
             self.tcp_thread.wait()
-        
+            
         # Stop WebSocket client
         if hasattr(self, 'websocket_client'):
             self.websocket_client.stop_client()
         if hasattr(self, 'websocket_thread') and self.websocket_thread:
             self.websocket_thread.quit()
             self.websocket_thread.wait()
-        
+            
         # Stop drone parser
         if hasattr(self, 'drone_parser') and self.drone_parser:
             try:
@@ -1027,7 +878,7 @@ class DroneControlMainWindow(QMainWindow):
                 self.drone_parser.stop()
             except Exception as e:
                 print(f"Error stopping drone parser: {e}")
-        
+            
         # Save waypoints
         if hasattr(self, 'main_point_cloud'):
             try:
@@ -1035,5 +886,5 @@ class DroneControlMainWindow(QMainWindow):
                 print("Waypoints saved")
             except Exception as e:
                 print(f"Error saving waypoints: {e}")
-        
+            
         event.accept()

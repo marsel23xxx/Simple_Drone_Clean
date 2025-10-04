@@ -50,7 +50,7 @@ class TCPDataReceiver(QObject):
             
             while self.running:
                 try:
-                    print("Waiting for point cloud data connection...")
+                    # print("Waiting for point cloud data connection...")
                     self.client_socket, client_address = self.server_socket.accept()
                     self.client_socket.settimeout(2.0)  # 2 second timeout for recv
                     

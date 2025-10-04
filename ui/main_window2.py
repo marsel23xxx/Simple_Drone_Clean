@@ -19,7 +19,7 @@ from config.settings import (
     APP_CONFIG, UI_CONFIG, ASSET_PATHS, NETWORK_CONFIG, FILE_PATHS
 )
 from .widgets.point_cloud_widget import SmoothPointCloudWidget
-from .widgets.video_stream_widget import VideoStreamWidget, RTSPStreamWidget, TCPVideoStreamWidget
+from ..video_stream_widget import VideoStreamWidget, RTSPStreamWidget, TCPVideoStreamWidget
 from .widgets.joystick_dialog import JoystickDialog
 from core.tcp_receiver import TCPDataReceiver, TCPServerThread
 from core.websocket_client import WebSocketCommandClient, WebSocketCommandThread

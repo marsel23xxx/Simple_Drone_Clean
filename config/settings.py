@@ -8,6 +8,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 ASSETS_DIR = PROJECT_ROOT / "assets"
 DATA_DIR = PROJECT_ROOT / "data"
 UI_ASSETS = ASSETS_DIR / "images"
+CV_CUSTOM = PROJECT_ROOT / "cv_custom"
 
 # Ensure data directory exists
 DATA_DIR.mkdir(exist_ok=True)
