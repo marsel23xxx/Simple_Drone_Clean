@@ -542,7 +542,7 @@ class Ui_MainWindow(object):
         self.DroneBattery.setTextDirection(QtWidgets.QProgressBar.TopToBottom)
         self.DroneBattery.setObjectName("DroneBattery")
         self.frame_14 = QtWidgets.QFrame(self.frame_8)
-        self.frame_14.setGeometry(QtCore.QRect(670, 310, 161, 121))
+        self.frame_14.setGeometry(QtCore.QRect(670, 310, 161, 111))
         self.frame_14.setStyleSheet("QFrame {\n"
 "    background-color: rgb(50, 50, 50);\n"
 "    border-radius: 20px;\n"
@@ -657,7 +657,7 @@ class Ui_MainWindow(object):
 "border: 0px gray; ")
         self.DroneHeight.setObjectName("DroneHeight")
         self.frame_18 = QtWidgets.QFrame(self.frame_8)
-        self.frame_18.setGeometry(QtCore.QRect(480, 350, 181, 81))
+        self.frame_18.setGeometry(QtCore.QRect(480, 350, 181, 71))
         self.frame_18.setStyleSheet("QFrame {\n"
 "    background-color: rgb(50, 50, 50);\n"
 "    border-radius: 20px;\n"
@@ -719,6 +719,34 @@ class Ui_MainWindow(object):
 "}\n"
 "")
         self.DroneSwitch.setObjectName("DroneSwitch")
+        self.DroneRefreshVideo = QtWidgets.QPushButton(self.frame_8)
+        self.DroneRefreshVideo.setGeometry(QtCore.QRect(480, 430, 351, 31))
+        self.DroneRefreshVideo.setCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+        self.DroneRefreshVideo.setStyleSheet("QPushButton {\n"
+"    background-color: rgb(65, 65, 65);\n"
+"    border: 2px solid black;\n"
+"    border-radius: 8px;\n"
+"    color: white;\n"
+"    font-weight: bold;\n"
+"    padding: 6px 12px;\n"
+"    text-align: center;\n"
+"}\n"
+"\n"
+"/* Hover effect */\n"
+"QPushButton:hover {\n"
+"    background-color: rgb(90, 90, 90);   \n"
+"    border: 2px solid rgb(120, 120, 120);\n"
+"    color: #e0e0e0;                    \n"
+"}\n"
+"\n"
+"/* Saat ditekan */\n"
+"QPushButton:pressed {\n"
+"    background-color: rgb(40, 40, 40);   \n"
+"    border: 2px solid rgb(100, 100, 100);\n"
+"    color: #cccccc;\n"
+"}\n"
+"")
+        self.DroneRefreshVideo.setObjectName("DroneRefreshVideo")
         self.label_9.raise_()
         self.SwitchView_2.raise_()
         self.frame_12.raise_()
@@ -728,6 +756,7 @@ class Ui_MainWindow(object):
         self.frame_15.raise_()
         self.frame_18.raise_()
         self.DroneSwitch.raise_()
+        self.DroneRefreshVideo.raise_()
         self.frame_4 = QtWidgets.QFrame(self.centralwidget)
         self.frame_4.setGeometry(QtCore.QRect(10, 524, 171, 461))
         self.frame_4.setStyleSheet("QFrame {\n"
@@ -1556,6 +1585,7 @@ class Ui_MainWindow(object):
         self.label_23.setText(_translate("MainWindow", "FLIGHT TIME"))
         self.DroneFlightTime.setText(_translate("MainWindow", "01:44"))
         self.DroneSwitch.setText(_translate("MainWindow", "Switch"))
+        self.DroneRefreshVideo.setText(_translate("MainWindow", "Refresh"))
         self.label_37.setText(_translate("MainWindow", "ALTITUDE"))
         self.label_16.setText(_translate("MainWindow", "DRONE CONTROLLER"))
         self.label_46.setText(_translate("MainWindow", "DEBUGGING CONSOLE"))
