@@ -51,14 +51,40 @@ def setup_application():
 def create_splash_screen():
     """Create and show splash screen during startup."""
     try:
-        # Try to load splash screen image
-        splash_path = project_root / "assets" / "splash" / "splash.png"
+        # Cara 1: Gunakan raw string
+        splash_path = project_root / r"assets\images\drone-display.png"
+        
+        # Atau cara 2: Forward slash juga bisa di Windows dengan pathlib
+        splash_path = project_root / "assets/images/drone-display.png"
+        
+        # Konversi ke string dengan resolve() untuk absolute path
+        splash_path_str = str(splash_path.resolve())
+        
+        print(f"=== SPLASH SCREEN DEBUG ===")
+        print(f"Splash path: {splash_path_str}")
+        print(f"Exists: {splash_path.exists()}")
+        print(f"Is file: {splash_path.is_file()}")
+        
         if splash_path.exists():
-            pixmap = QPixmap(str(splash_path))
+            pixmap = QPixmap(splash_path_str)
+            
+            if not pixmap.isNull():
+                print(f"✓ Loaded: {pixmap.width()}x{pixmap.height()}px")
+            else:
+                print("✗ QPixmap is NULL - file may be corrupted")
+                # Cek apakah Qt bisa membaca format ini
+                from PyQt5.QtGui import QImageReader
+                reader = QImageReader(splash_path_str)
+                print(f"Can read: {reader.canRead()}")
+                print(f"Error: {reader.errorString()}")
+                pixmap = QPixmap(400, 300)
+                pixmap.fill(Qt.darkGray)
         else:
-            # Create simple splash screen
+            print("✗ File not found, using fallback")
             pixmap = QPixmap(400, 300)
             pixmap.fill(Qt.darkGray)
+        
+        print("=" * 30)
         
         splash = QSplashScreen(pixmap)
         splash.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.SplashScreen)
@@ -67,6 +93,8 @@ def create_splash_screen():
         return splash
     except Exception as e:
         print(f"Could not create splash screen: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def update_splash_message(splash, message):

@@ -68,14 +68,14 @@ FILE_PATHS = {
 
 # Asset paths
 ASSET_PATHS = {
-    'logo': UI_ASSETS / 'LOGO R BG-012.png',
+    'logo': UI_ASSETS / 'Bayu_sakti.png',
     'drone_display': UI_ASSETS / 'drone-display.png',
     'compass': UI_ASSETS / 'compas.png',
     'emergency': UI_ASSETS / 'emergency.png',
     'altitude': UI_ASSETS / 'altitude.png',
     'drone_top': UI_ASSETS / 'Drone 2.png',
     'drone_bottom': UI_ASSETS / 'Drone 3.png',
-    'drone_png': UI_ASSETS / 'DRONETOP.png'
+    'drone_png': UI_ASSETS / 'DRONETOP.png',
 }
 
 # Ensure log directory exists

@@ -1,15 +1,13 @@
-# video_stream_widget.py - FIXED VERSION
+# ui/widgets/video_stream_widget.py - ENHANCED MULTI-CAMERA VERSION
 import os
 import sys
 
 # OpenCV import (cross-platform with fallback)
 cv_folder = os.path.join(os.getcwd(), "cv_custom")
-
-os.add_dll_directory(cv_folder)
-
-
-sys.path.insert(0, cv_folder)
-os.environ.setdefault("GST_PLUGIN_PATH", cv_folder)
+if os.path.exists(cv_folder):
+    os.add_dll_directory(cv_folder)
+    sys.path.insert(0, cv_folder)
+    os.environ.setdefault("GST_PLUGIN_PATH", cv_folder)
 
 try:
     import cv_custom as cv
@@ -23,11 +21,9 @@ except Exception:
     print("✓ Using standard OpenCV")
 
 print("OpenCV version:", cv.__version__)
-print("Available backends:", cv.getBuildInformation())
 
 import threading
 import time
-import subprocess
 import socket
 import numpy as np
 from PyQt5.QtCore import QTimer
@@ -42,7 +38,6 @@ class RTSPConnectionTester:
     def test_rtsp_connectivity(rtsp_url, timeout=5):
         """Test if RTSP stream is reachable"""
         try:
-            # Validasi input
             if not rtsp_url or not isinstance(rtsp_url, str):
                 return False, "Invalid URL type"
             
@@ -51,16 +46,13 @@ class RTSPConnectionTester:
             if not rtsp_url.startswith('rtsp://'):
                 return False, f"Not an RTSP URL: {rtsp_url[:20]}"
             
-            # Parse URL - lebih robust
-            url_part = rtsp_url[7:]  # hapus 'rtsp://'
+            url_part = rtsp_url[7:]
             
-            # Pisahkan host:port dari path
             if '/' in url_part:
                 host_port = url_part.split('/')[0]
             else:
                 host_port = url_part
             
-            # Parse host dan port
             if ':' in host_port:
                 parts = host_port.rsplit(':', 1)
                 host = parts[0]
@@ -72,7 +64,6 @@ class RTSPConnectionTester:
                 host = host_port
                 port = 554
             
-            # Test koneksi socket
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(timeout)
             result = sock.connect_ex((host, port))
@@ -85,44 +76,20 @@ class RTSPConnectionTester:
                 
         except Exception as e:
             return False, f"Connection test failed: {e}"
-    
-    @staticmethod
-    def test_with_ffprobe(rtsp_url, timeout=10):
-        """Test RTSP stream using ffprobe"""
-        try:
-            cmd = [
-                'ffprobe',
-                '-v', 'quiet',
-                '-select_streams', 'v:0',
-                '-show_entries', 'stream=width,height,codec_name',
-                '-of', 'csv=p=0',
-                '-timeout', str(timeout * 1000000),
-                rtsp_url
-            ]
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-            if result.returncode == 0:
-                return True, f"Stream info: {result.stdout.strip()}"
-            else:
-                return False, f"ffprobe failed: {result.stderr.strip()}"
-                
-        except subprocess.TimeoutExpired:
-            return False, "ffprobe timeout"
-        except FileNotFoundError:
-            return False, "ffprobe not found (install FFmpeg)"
-        except Exception as e:
-            return False, f"ffprobe error: {e}"
 
 
 class RTSPCamera(QThread):
-    """RTSP Camera with multiple connection methods"""
+    """Independent RTSP Camera thread - continues running even if other cameras fail"""
     
     frame_ready = pyqtSignal(np.ndarray)
     connection_status_changed = pyqtSignal(str)
+    camera_failed = pyqtSignal(str)  # New signal for critical failures
     
-    def __init__(self, rtsp_url, width_scale=0.5, height_scale=0.5, latency_ms=50):
+    def __init__(self, rtsp_url, camera_id, ai_worker=None, width_scale=0.5, height_scale=0.5, latency_ms=50):
         super().__init__()
         self.rtsp_url = rtsp_url.strip() if rtsp_url else ""
+        self.camera_id = camera_id
+        self.ai_worker = ai_worker
         self.width_scale = width_scale
         self.height_scale = height_scale
         self.latency_ms = latency_ms
@@ -130,277 +97,181 @@ class RTSPCamera(QThread):
         self.running = False
         self.lock = threading.Lock()
         self.cap = None
+        self.failed = False  # Track if camera has permanently failed
         
-        # Debug print
-        print(f"📷 RTSPCamera initialized with URL: {self.rtsp_url}")
-        
+    def set_ai_worker(self, ai_worker):
+        """Set AI worker untuk camera ini"""
+        self.ai_worker = ai_worker
+        print(f"🤖 AI worker set for camera {self.camera_id}")
+    
     def run(self):
-        """Main thread for video capture with multiple fallback methods"""
-        self.running = True
-        self.connection_status_changed.emit("Testing Connection...")
+        """Main thread with independent error handling"""
+        print(f"🚀 Starting RTSP camera {self.camera_id}: {self.rtsp_url[:50]}")
         
-        if cv is None:
-            self.connection_status_changed.emit("OpenCV Not Available")
-            self.running = False
+        if not self.rtsp_url:
+            self.connection_status_changed.emit("Invalid URL")
+            self.failed = True
+            self.camera_failed.emit(f"Camera {self.camera_id}: Invalid URL")
             return
         
-        # Test connectivity dengan URL yang sudah pasti ada
-        print(f"🔍 Testing connectivity for: {self.rtsp_url}")
-        is_reachable, msg = RTSPConnectionTester.test_rtsp_connectivity(self.rtsp_url)
-        print(f"   Result: {msg}")
+        self.running = True
         
-        if not is_reachable:
+        # Test connectivity
+        self.connection_status_changed.emit("Testing Connection")
+        reachable, msg = RTSPConnectionTester.test_rtsp_connectivity(self.rtsp_url)
+        print(f"📡 Camera {self.camera_id} connectivity: {msg}")
+        
+        if not reachable:
             self.connection_status_changed.emit("Server Unreachable")
-            print(f"⚠️ Server unreachable, but will try to connect anyway...")
-        
-        connection_methods = [
-            self._try_gstreamer_pipeline,
-            self._try_ffmpeg_backend,
-            self._try_direct_rtsp,
-            self._try_direct_rtsp_with_options,
-        ]
-        
-        success = False
-        for i, method in enumerate(connection_methods):
-            self.connection_status_changed.emit(f"Trying Method {i+1}/4...")
-            
-            # Timeout wrapper
-            result = [False]
-            
-            def try_with_timeout():
-                result[0] = method()
-            
-            thread = threading.Thread(target=try_with_timeout)
-            thread.daemon = True
-            thread.start()
-            thread.join(timeout=15)  # 15 detik timeout
-            
-            if thread.is_alive():
-                print(f"⏱️ Method {i+1} timeout after 15s")
-                if self.cap:
-                    try:
-                        self.cap.release()
-                    except:
-                        pass
-                    self.cap = None
-                continue
-            
-            if result[0]:
-                success = True
-                break
-        
-        if not success:
-            print("❌ All connection methods failed")
-            self.connection_status_changed.emit("All Methods Failed")
             self.running = False
+            self.failed = True
+            self.camera_failed.emit(f"Camera {self.camera_id}: {msg}")
+            return
+        
+        # Try connection methods
+        connection_methods = []
+        
+        if has_gstreamer:
+            pipeline = (
+                f"rtspsrc location={self.rtsp_url} latency={self.latency_ms} ! "
+                "rtph264depay ! h264parse ! avdec_h264 ! "
+                "videoconvert ! appsink"
+            )
+            connection_methods.append(("GStreamer", cv.CAP_GSTREAMER, pipeline))
+        
+        if has_ffmpeg:
+            connection_methods.append(("FFMPEG", cv.CAP_FFMPEG, self.rtsp_url))
+        
+        connection_methods.append(("Default", cv.CAP_ANY, self.rtsp_url))
+        
+        # Try each method
+        for method_name, backend, source in connection_methods:
+            if not self.running:
+                break
+                
+            self.connection_status_changed.emit(f"Trying {method_name}")
+            print(f"🔧 Camera {self.camera_id} - {method_name}...")
+            
+            try:
+                self.cap = cv.VideoCapture(source, backend)
+                
+                if backend == cv.CAP_FFMPEG:
+                    self.cap.set(cv.CAP_PROP_BUFFERSIZE, 1)
+                    self.cap.set(cv.CAP_PROP_FPS, 30)
+                
+                time.sleep(1)
+                
+                if self.cap.isOpened():
+                    ret, test_frame = self.cap.read()
+                    if ret and test_frame is not None:
+                        print(f"✅ Camera {self.camera_id} connected via {method_name}")
+                        break
+                    else:
+                        self.cap.release()
+                        self.cap = None
+                else:
+                    if self.cap:
+                        self.cap.release()
+                        self.cap = None
+                    
+            except Exception as e:
+                print(f"❌ Camera {self.camera_id} {method_name} error: {e}")
+                if self.cap:
+                    self.cap.release()
+                    self.cap = None
+        
+        if not self.cap or not self.cap.isOpened():
+            self.connection_status_changed.emit("All Methods Failed")
+            print(f"❌ Camera {self.camera_id} - all methods failed")
+            self.running = False
+            self.failed = True
+            self.camera_failed.emit(f"Camera {self.camera_id}: All connection methods failed")
             return
         
         self.connection_status_changed.emit("Connected")
-        print("✅ RTSP stream connected successfully")
+        print(f"✅ Camera {self.camera_id} connected - entering main loop")
         
         frame_count = 0
         consecutive_failures = 0
         max_failures = 30
         
+        # MAIN CAPTURE LOOP - Independent execution
         while self.running:
-            ret, frame = self.cap.read()
-            
-            if not ret:
+            try:
+                ret, frame = self.cap.read()
+                
+                if not ret or frame is None:
+                    consecutive_failures += 1
+                    if consecutive_failures >= max_failures:
+                        print(f"❌ Camera {self.camera_id} - too many failures, stopping")
+                        self.failed = True
+                        self.camera_failed.emit(f"Camera {self.camera_id}: Frame read failures")
+                        break
+                    self.msleep(100)
+                    continue
+                
+                consecutive_failures = 0
+                frame_count += 1
+                
+                # Store frame
+                with self.lock:
+                    self.frame = frame.copy()
+                
+                # Emit raw frame (AI processing handled externally)
+                self.frame_ready.emit(frame)
+                
+                # Small sleep to prevent CPU overload
+                if frame_count % 100 == 0:
+                    self.msleep(1)
+                
+            except Exception as e:
+                print(f"❌ Camera {self.camera_id} capture error: {e}")
                 consecutive_failures += 1
                 if consecutive_failures >= max_failures:
-                    print(f"❌ Too many consecutive failures ({consecutive_failures})")
-                
+                    self.failed = True
+                    self.camera_failed.emit(f"Camera {self.camera_id}: Critical error - {str(e)}")
+                    break
                 self.msleep(100)
-                continue
-            else:
-                consecutive_failures = 0
-            
-            frame_count += 1
-            if frame_count % 100 == 0:
-                # print(f"📹 Frame count: {frame_count}")
-                pass
-            
-            if self.width_scale != 1.0 or self.height_scale != 1.0:
-                h, w = frame.shape[:2]
-                frame = cv.resize(frame, 
-                    (int(w * self.width_scale), int(h * self.height_scale)))
-            
-            with self.lock:
-                self.frame = frame.copy()
-            
-            self.frame_ready.emit(frame)
-            self.msleep(1)
         
-        print("🛑 RTSP capture loop ended")
-    
-    def _try_gstreamer_pipeline(self):
-        if not has_gstreamer:
-            print("⏭️ Skipping GStreamer (not available)")
-            return False
+        # Cleanup
+        print(f"🛑 Camera {self.camera_id} stopped ({frame_count} frames)")
         
-        try:
-            print("🔄 Trying GStreamer pipeline...")
-            
-            gst_pipeline = (
-                f'rtspsrc location={self.rtsp_url} latency={self.latency_ms} drop-on-latency=true protocols=tcp ! '
-                f'rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! '
-                f'video/x-raw,format=BGR ! appsink drop=true sync=false max-buffers=1'
-            )
-            self.cap = cv.VideoCapture(gst_pipeline, cv.CAP_GSTREAMER)
-            
-            if self.cap.isOpened():
-                ret, test_frame = self.cap.read()
-                if ret:
-                    print("✅ GStreamer pipeline working")
-                    return True
-                else:
-                    print("❌ GStreamer pipeline opened but no frames")
-                    self.cap.release()
-                    self.cap = None
-            else:
-                print("❌ GStreamer pipeline failed to open")
-                
-        except Exception as e:
-            print(f"❌ GStreamer exception: {e}")
-            if self.cap:
-                self.cap.release()
-                self.cap = None
-        
-        return False
-    
-    def _try_ffmpeg_backend(self):
-        if not has_ffmpeg:
-            print("⏭️ Skipping FFMPEG (not available)")
-            return False
-        
-        try:
-            print("🔄 Trying FFMPEG backend...")
-            self.cap = cv.VideoCapture(self.rtsp_url, cv.CAP_FFMPEG)
-            
-            if self.cap.isOpened():
-                self.cap.set(cv.CAP_PROP_BUFFERSIZE, 1)
-                
-                ret, test_frame = self.cap.read()
-                if ret and test_frame is not None:
-                    print("✅ FFMPEG backend working")
-                    return True
-                else:
-                    print("❌ FFMPEG backend opened but no frames")
-                    self.cap.release()
-                    self.cap = None
-            else:
-                print("❌ FFMPEG backend failed to open")
-                
-        except Exception as e:
-            print(f"❌ FFMPEG exception: {e}")
-            if self.cap:
-                self.cap.release()
-                self.cap = None
-        
-        return False
-    
-    def _try_direct_rtsp(self):
-        try:
-            print(f"🔄 Trying direct RTSP for: {self.rtsp_url}")
-            print(f"   URL length: {len(self.rtsp_url)}")
-            print(f"   URL bytes: {self.rtsp_url.encode()}")
-            
-            # Set environment variables untuk RTSP
-            os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'rtsp_transport;tcp'
-            
-            self.cap = cv.VideoCapture(self.rtsp_url)
-            print(f"   ✓ VideoCapture object created")
-            print(f"   ✓ Is opened: {self.cap.isOpened()}")
-            
-            if self.cap.isOpened():
-                # Set buffer minimal
-                self.cap.set(cv.CAP_PROP_BUFFERSIZE, 1)
-                
-                print(f"   📖 Reading test frame (this may take 5-30 seconds)...")
-                
-                # Coba baca beberapa kali karena frame pertama sering gagal
-                max_attempts = 5
-                for attempt in range(max_attempts):
-                    ret, test_frame = self.cap.read()
-                    print(f"   Attempt {attempt+1}/{max_attempts}: ret={ret}, frame={'OK' if test_frame is not None else 'None'}")
-                    
-                    if ret and test_frame is not None:
-                        h, w = test_frame.shape[:2]
-                        print(f"✅ Direct RTSP working! Frame size: {w}x{h}")
-                        return True
-                    
-                    # Tunggu sebentar sebelum coba lagi
-                    time.sleep(0.5)
-                
-                print("❌ Direct RTSP opened but no frames after 5 attempts")
-                self.cap.release()
-                self.cap = None
-            else:
-                print("❌ Direct RTSP failed to open")
-                
-        except Exception as e:
-            print(f"❌ Direct RTSP exception: {e}")
-            import traceback
-            traceback.print_exc()
-            if self.cap:
-                self.cap.release()
-                self.cap = None
-        
-        return False
-    
-    def _try_direct_rtsp_with_options(self):
-        try:
-            print("🔄 Trying RTSP with TCP transport...")
-            rtsp_tcp_url = self.rtsp_url
-            if '?' in rtsp_tcp_url:
-                rtsp_tcp_url += '&tcp'
-            else:
-                rtsp_tcp_url += '?tcp'
-            
-            self.cap = cv.VideoCapture(rtsp_tcp_url)
-            
-            if self.cap.isOpened():
-                self.cap.set(cv.CAP_PROP_BUFFERSIZE, 1)
-                
-                print(f"   📖 Reading test frame with TCP...")
-                max_attempts = 5
-                for attempt in range(max_attempts):
-                    ret, test_frame = self.cap.read()
-                    print(f"   Attempt {attempt+1}/{max_attempts}: ret={ret}")
-                    
-                    if ret and test_frame is not None:
-                        print("✅ RTSP with TCP transport working")
-                        return True
-                    
-                    time.sleep(0.5)
-                
-                print("❌ RTSP TCP opened but no frames")
-                self.cap.release()
-                self.cap = None
-            else:
-                print("❌ RTSP TCP failed to open")
-                
-        except Exception as e:
-            print(f"❌ RTSP TCP exception: {e}")
-            if self.cap:
-                self.cap.release()
-                self.cap = None
-        
-        return False
-    
-    def stop(self):
-        print("🛑 Stopping RTSP camera...")
-        self.running = False
         if self.cap:
-            self.cap.release()
-    
-    def get_frame(self):
-        with self.lock:
-            return self.frame.copy() if self.frame is not None else None
+            try:
+                self.cap.release()
+            except:
+                pass
+            self.cap = None
+        
+        self.running = False
+        if not self.failed:
+            self.connection_status_changed.emit("Disconnected")
+        
+    def stop(self):
+        """Stop the camera thread safely"""
+        print(f"🛑 Stopping camera {self.camera_id}")
+        self.running = False
+        
+        if self.isRunning():
+            self.wait(3000)
+            
+            if self.isRunning():
+                print(f"⚠️ Camera {self.camera_id} terminating...")
+                self.terminate()
+                self.wait()
+        
+        if self.cap:
+            try:
+                self.cap.release()
+            except:
+                pass
+            self.cap = None
+        
+        print(f"✅ Camera {self.camera_id} stopped")
 
 
 class VideoStreamWidget(QWidget):
-    """Widget for displaying video streaming from drone."""
+    """Widget for displaying video streaming."""
     
     frame_received = pyqtSignal()
     
@@ -430,7 +301,6 @@ class VideoStreamWidget(QWidget):
         
         self.show_info_overlay = True
         self.fps = 0.0
-        
         self.connection_status = "Disconnected"
         
     def update_frame(self, frame_data):
@@ -506,7 +376,6 @@ class VideoStreamWidget(QWidget):
     def add_info_overlay(self, qimage):
         """Add information overlay to image."""
         overlay_image = qimage.copy()
-        
         painter = QPainter(overlay_image)
         painter.setRenderHint(QPainter.Antialiasing)
         
@@ -514,15 +383,7 @@ class VideoStreamWidget(QWidget):
         painter.setFont(font)
         painter.setPen(QPen(QColor(255, 255, 255), 1))
         
-        cv_info = "No OpenCV"
-        if cv:
-            gst_status = "GStreamer" if has_gstreamer else "No GStreamer"
-            ffmpeg_status = "FFMPEG" if has_ffmpeg else "No FFMPEG"
-            cv_info = f"OpenCV {cv.__version__} ({gst_status}, {ffmpeg_status})"
-        
-        # overlay_text = f"FPS: {self.fps:.1f} | Frames: {self.frame_count} | {self.connection_status}"
-        overlay_text = f""
-        # overlay_text += f"\n{cv_info}"
+        overlay_text = f"FPS: {self.fps:.1f} | Frames: {self.frame_count}"
         
         lines = overlay_text.split('\n')
         line_height = painter.fontMetrics().height()
@@ -572,24 +433,79 @@ class VideoStreamWidget(QWidget):
 
 
 class RTSPStreamWidget(VideoStreamWidget):
-    """Video streaming widget with RTSP support - Like ARM_UI.py"""
+    """Multi-Camera video streaming widget with INDEPENDENT camera handling"""
     
     def __init__(self):
         super().__init__()
-        # Camera objects dictionary
         self.cameras = {}
-        self.main_camera_key = "rtsp"
+        self.camera_states = {}  # Track each camera's state
+        self.ai_controller = None
         
+    def set_ai_controller(self, ai_controller):
+        """Set AI controller untuk multi-camera processing"""
+        self.ai_controller = ai_controller
+        print("🤖 AI Controller set for RTSPStreamWidget")
+        
+    def start_single_camera(self, cam_id, url, width_scale=0.5, height_scale=0.5, enable_ai=True):
+        """Start single camera independently - other cameras unaffected"""
+        try:
+            print(f"\n📹 Starting {cam_id}...")
+            
+            # Get AI worker if available
+            ai_worker = None
+            if enable_ai and self.ai_controller:
+                cam_index = int(cam_id.replace('cam', ''))
+                if cam_index < len(self.ai_controller.workers):
+                    ai_worker = self.ai_controller.workers[cam_index]
+            
+            # Create and start camera thread
+            camera = RTSPCamera(
+                url, 
+                camera_id=cam_id,
+                ai_worker=ai_worker,
+                width_scale=width_scale, 
+                height_scale=height_scale,
+                latency_ms=0
+            )
+            
+            # Connect signals
+            camera.connection_status_changed.connect(
+                lambda status, cid=cam_id: self.on_camera_status_changed(cid, status)
+            )
+            camera.camera_failed.connect(
+                lambda msg: self.on_camera_failed(msg)
+            )
+            
+            # Start camera
+            camera.start()
+            self.cameras[cam_id] = camera
+            self.camera_states[cam_id] = "starting"
+            
+            print(f"   ✅ {cam_id} thread started")
+            return True
+            
+        except Exception as e:
+            print(f"   ❌ {cam_id} failed to start: {e}")
+            self.camera_states[cam_id] = "failed"
+            return False
+    
+    @pyqtSlot(str, str)
+    def on_camera_status_changed(self, cam_id, status):
+        """Handle camera status changes"""
+        self.camera_states[cam_id] = status.lower()
+        print(f"📡 {cam_id}: {status}")
+    
+    @pyqtSlot(str)
+    def on_camera_failed(self, message):
+        """Handle camera failure - does not affect other cameras"""
+        print(f"⚠️ CAMERA FAILURE: {message}")
+        # Other cameras continue operating normally
+    
     def start_stream(self, rtsp_url=None, cam1_url=None, cam2_url=None, 
-                     width_scale=0.5, height_scale=0.5):
+                     width_scale=0.5, height_scale=0.5, enable_ai=False):
         """
-        Start all camera streams
-        Args:
-            rtsp_url: Main RTSP camera URL
-            cam1_url: Camera 1 (bottom) URL  
-            cam2_url: Camera 2 (top) URL
-            width_scale: Scale factor for width
-            height_scale: Scale factor for height
+        Start all camera streams independently
+        If one camera fails, others continue operating
         """
         if not rtsp_url:
             rtsp_url = "rtsp://192.168.1.99:1234"
@@ -598,103 +514,114 @@ class RTSPStreamWidget(VideoStreamWidget):
         if not cam2_url:
             cam2_url = "rtsp://192.168.1.88:8554/top"
     
-        print(f"🎬 Starting RTSP streams...")
-        print(f"  Main: {rtsp_url}")
-        print(f"  Cam1: {cam1_url}")
-        print(f"  Cam2: {cam2_url}")
-    
-        if cv is None:
-            print("❌ OpenCV not available")
-            self.set_no_signal_message("OpenCV Not Available")
-            return False
-    
-        try:
-            # Main RTSP camera - displays in main widget
-            self.cameras["rtsp"] = RTSPCamera(
-                rtsp_url, 
-                width_scale=width_scale, 
-                height_scale=height_scale,
-                latency_ms=0
-            )
-            self.cameras["rtsp"].frame_ready.connect(self.update_frame)
-            self.cameras["rtsp"].connection_status_changed.connect(self.update_connection_status)
-            self.cameras["rtsp"].start()
-            print(f"✓ Main RTSP camera started")
-            
-            # Camera 1 - Bottom (for AI processing)
-            self.cameras["http1"] = RTSPCamera(
-                cam1_url,
-                width_scale=0.6,
-                height_scale=0.6,
-                latency_ms=0
-            )
-            self.cameras["http1"].frame_ready.connect(lambda frame: None)  # Silent
-            self.cameras["http1"].start()
-            print(f"✓ Camera 1 (Bottom) started")
-            
-            # Camera 2 - Top (for AI processing)
-            self.cameras["http2"] = RTSPCamera(
-                cam2_url,
-                width_scale=0.6,
-                height_scale=0.6,
-                latency_ms=0
-            )
-            self.cameras["http2"].frame_ready.connect(lambda frame: None)  # Silent
-            self.cameras["http2"].start()
-            print(f"✓ Camera 2 (Top) started")
-            
-            return True
-    
-        except Exception as e:
-            print(f"❌ Error starting streams: {e}")
-            return False
-    
-    def get_all_frames(self):
-        """Get frames from all cameras for AI processing"""
-        frames = {}
+        print(f"\n{'='*60}")
+        print(f"🎬 STARTING INDEPENDENT MULTI-CAMERA STREAMS (AI: {enable_ai})")
+        print(f"{'='*60}")
+        print(f"Main Camera: {rtsp_url}")
+        print(f"Camera 1 (Bottom): {cam1_url}")
+        print(f"Camera 2 (Top): {cam2_url}")
+        print(f"AI Controller: {'SET' if self.ai_controller else 'NOT SET'}")
+        print(f"{'='*60}\n")
         
-        if "rtsp" in self.cameras:
-            frame = self.cameras["rtsp"].get_frame()
-            if frame is not None:
-                frames['main'] = frame
+        success_count = 0
         
-        if "http1" in self.cameras:
-            frame = self.cameras["http1"].get_frame()
-            if frame is not None:
-                frames['camera1'] = frame
+        # Start Camera 0 independently
+        if self.start_single_camera("cam0", rtsp_url, width_scale, height_scale, enable_ai):
+            if "cam0" in self.cameras:
+                self.cameras["cam0"].frame_ready.connect(self.on_cam0_frame)
+                success_count += 1
+        time.sleep(0.3)
         
-        if "http2" in self.cameras:
-            frame = self.cameras["http2"].get_frame()
-            if frame is not None:
-                frames['camera2'] = frame
+        # Start Camera 1 independently
+        if self.start_single_camera("cam1", cam1_url, 0.4, 0.4, enable_ai):
+            if "cam1" in self.cameras:
+                self.cameras["cam1"].frame_ready.connect(self.on_cam1_frame)
+                success_count += 1
+        time.sleep(0.3)
         
-        return frames
+        # Start Camera 2 independently
+        if self.start_single_camera("cam2", cam2_url, 0.4, 0.4, enable_ai):
+            if "cam2" in self.cameras:
+                self.cameras["cam2"].frame_ready.connect(self.on_cam2_frame)
+                success_count += 1
+        time.sleep(1)
+        
+        # Status report
+        print(f"\n{'='*60}")
+        print("📊 CAMERA STATUS CHECK")
+        print(f"{'='*60}")
+        
+        for cam_id in ["cam0", "cam1", "cam2"]:
+            if cam_id in self.cameras:
+                camera = self.cameras[cam_id]
+                is_running = camera.isRunning()
+                has_cap = camera.cap is not None
+                cap_opened = camera.cap.isOpened() if has_cap else False
+                failed = camera.failed
+                
+                if failed:
+                    status = "❌ FAILED"
+                elif is_running and cap_opened:
+                    status = "✅ ACTIVE"
+                else:
+                    status = "⚠️ STARTING"
+                
+                print(f"{cam_id.upper():10} - {status}")
+                print(f"           Thread: {is_running} | Capture: {cap_opened} | Failed: {failed}")
+            else:
+                print(f"{cam_id.upper():10} - ❌ NOT STARTED")
+            print()
+        
+        print(f"{'='*60}")
+        print(f"✅ {success_count}/3 cameras started successfully")
+        print(f"{'='*60}\n")
+        
+        return success_count > 0  # Success if at least one camera started
+    
+    def on_cam0_frame(self, frame):
+        """Store Camera 0 frame"""
+        if not hasattr(self, 'cam0_latest_frame'):
+            self.cam0_latest_frame = None
+        self.cam0_latest_frame = frame.copy()
+    
+    def on_cam1_frame(self, frame):
+        """Store Camera 1 frame"""
+        if not hasattr(self, 'cam1_latest_frame'):
+            self.cam1_latest_frame = None
+        self.cam1_latest_frame = frame.copy()
+    
+    def on_cam2_frame(self, frame):
+        """Store Camera 2 frame"""
+        if not hasattr(self, 'cam2_latest_frame'):
+            self.cam2_latest_frame = None
+        self.cam2_latest_frame = frame.copy()
+    
+    def get_active_cameras(self):
+        """Get list of currently active cameras"""
+        active = []
+        for cam_id, camera in self.cameras.items():
+            if not camera.failed and camera.isRunning():
+                active.append(cam_id)
+        return active
     
     def stop_stream(self):
-        """Stop all camera streams properly"""
+        """Stop all camera streams"""
+        print("\n🛑 Stopping all camera streams...")
         for key, camera in self.cameras.items():
-            print(f"Stopping {key} camera...")
-            camera.stop()
+            print(f"  Stopping {key}...")
+            try:
+                camera.stop()
+            except Exception as e:
+                print(f"  Error stopping {key}: {e}")
         
         self.cameras.clear()
+        self.camera_states.clear()
         self.clear_video()
-        print("⏹ All streams stopped")
-    
-    @pyqtSlot(str)
-    def update_connection_status(self, status):
-        """Update connection status."""
-        self.connection_status = status
-        print(f"📡 Connection status: {status}")
-        
-        if status in ["All Methods Failed", "OpenCV Not Available", "Server Unreachable"]:
-            self.clear_video()
-            self.set_no_signal_message(status)
-        elif "Trying" in status or "Testing" in status:
-            self.set_no_signal_message(status)
+        print("⏹ All streams stopped\n")
 
 
 class TCPVideoStreamWidget(VideoStreamWidget):
-    """Video streaming widget with TCP socket support."""
+    """TCP video streaming widget."""
     
     def __init__(self):
         super().__init__()

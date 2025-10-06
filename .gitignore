@@ -1,1 +1,7 @@
 venv/
+
+# Ignore AI model files
+*.pt
+*.pth
+ai/models/*.pt
+ai/models/*.pth

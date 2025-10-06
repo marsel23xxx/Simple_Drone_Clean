@@ -218,7 +218,7 @@ class Ui_MainWindow(object):
         self.frame_17 = QtWidgets.QFrame(self.centralwidget)
         self.frame_17.setGeometry(QtCore.QRect(1070, 14, 841, 185))
         self.frame_17.setStyleSheet("QFrame {\n"
-"    background-color: #4d4d4d;\n"
+"    background-color: rgb(135, 135, 135);\n"
 "    border-radius: 20px;\n"
 "}")
         self.frame_17.setFrameShape(QtWidgets.QFrame.StyledPanel)
@@ -260,8 +260,8 @@ class Ui_MainWindow(object):
         self.CommandOnline.setText("")
         self.CommandOnline.setObjectName("CommandOnline")
         self.label = QtWidgets.QLabel(self.frame_17)
-        self.label.setGeometry(QtCore.QRect(150, 10, 201, 61))
-        self.label.setStyleSheet(" image: url(\"C:/laragon/www/QT Drone/assets/LOGO R BG-012.png\");")
+        self.label.setGeometry(QtCore.QRect(150, 0, 210, 81))
+        self.label.setStyleSheet(" image: url(\"C:/laragon/www/QT Drone/assets/LOGO R BG-012.png\"); background: transparent;")
         self.label.setText("")
         self.label.setObjectName("label")
         self.label_2 = QtWidgets.QLabel(self.frame_17)
@@ -390,7 +390,7 @@ class Ui_MainWindow(object):
         self.frame_8 = QtWidgets.QFrame(self.centralwidget)
         self.frame_8.setGeometry(QtCore.QRect(210, 514, 841, 471))
         self.frame_8.setStyleSheet("QFrame {\n"
-"    background-color: #4d4d4d;\n"
+"    background-color: rgb(135, 135, 135);\n"
 "    border-radius: 20px;\n"
 "}")
         self.frame_8.setFrameShape(QtWidgets.QFrame.StyledPanel)
@@ -847,7 +847,7 @@ class Ui_MainWindow(object):
         self.frame_30.setGeometry(QtCore.QRect(1070, 460, 841, 361))
         self.frame_30.setStyleSheet("border-radius: 10px;\n"
 "border: 1px solid black;\n"
-"background-color: #4d4d4d;")
+"background-color: rgb(135, 135, 135);")
         self.frame_30.setFrameShape(QtWidgets.QFrame.StyledPanel)
         self.frame_30.setFrameShadow(QtWidgets.QFrame.Raised)
         self.frame_30.setObjectName("frame_30")

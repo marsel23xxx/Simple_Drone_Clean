@@ -1,0 +1,22 @@
+Crack Detection Analysis
+Camera: 0
+Timestamp: 2025-10-05 19:42:15
+Total Cracks Detected: 1
+============================================================
+
+Crack 1:
+Classification: Medium
+Confidence: 0.85
+
+POSITION ANALYSIS (METERS):
+X - Distance from Camera: 0.087 m
+Y - Horizontal Distance: +0.002 m
+Z - Height from Ground: 1.500 m
+
+CRACK MEASUREMENTS:
+Width: 0.0833 m
+Height: 0.0970 m
+Length: 0.1279 m
+Max Thickness: 0.0054 m
+Critical: Yes
+----------------------------------------

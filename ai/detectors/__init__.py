@@ -1,19 +1,23 @@
+
 """
 AI Detectors Package
+Provides multi-camera detection capabilities for drone inspection
 """
 
-from .crack_detector import CrackDetector
-from .hazmat_detector import HazmatDetector
-from .qr_detector import QRDetector
-from .landolt_detector import LandoltDetector
-from .motion_detector import MotionDetector
-from .rust_detector import RustDetector
+from .my_detection import (
+    MultiCameraController,
+    SharedModelManager,
+    CameraWorker,
+    GPUManager,
+    gpu_manager
+)
 
 __all__ = [
-    'CrackDetector',
-    'HazmatDetector', 
-    'QRDetector',
-    'LandoltDetector',
-    'MotionDetector',
-    'RustDetector'
+    'MultiCameraController',
+    'SharedModelManager', 
+    'CameraWorker',
+    'GPUManager',
+    'gpu_manager'
 ]
+
+__version__ = '1.0.0'
