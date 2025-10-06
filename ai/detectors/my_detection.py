@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict
 from collections import deque
 from functools import lru_cache
+from core.drone_parser import DroneParser
 import gc
 
 # Try to import easyocr
@@ -582,6 +583,9 @@ class CameraWorker:
         self.models = shared_models
         self.output_base = f"{output_base}_cam{camera_id}"
         self.device = gpu_manager.device
+        
+        self.drone_parser = DroneParser(port=8889)
+        self.drone_parser.start()
         
         # LANDOLT PARAMETERS
         self.dp = 1.0
@@ -2186,61 +2190,152 @@ class CameraWorker:
         if not self.is_frozen or self.frozen_frame is None:
             print(f"[CAM {self.camera_id}] Nothing to save - not frozen")
             return False
-        
+
+        import csv
+        import datetime
+        import os
+        import math
+
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        
+
+        # Color for each detection type
+        color_map = {
+            'landolt': 'yellow',
+            'qr': 'blue',
+            'hazmat': 'red',
+            'crack': 'orange',
+            'rust': 'brown',
+            'motion': 'green'
+        }
+
+        # Camera offset distances
+        CAMERA_OFFSETS = {
+            0: 0.10,
+            1: 0.10,
+            2: 0.10,
+        }
+
+        offset_distance = CAMERA_OFFSETS.get(self.camera_id, 0.10)
+
+        def calculate_offset_position(drone_x, drone_y, drone_z, yaw_rad, offset_m):
+            """Calculate detection position offset in front of drone."""
+            if drone_x is None or drone_y is None or yaw_rad is None:
+                return drone_x, drone_y, drone_z
+
+            offset_x = drone_x + (offset_m * math.cos(yaw_rad))
+            offset_y = drone_y + (offset_m * math.sin(yaw_rad))
+            offset_z = drone_z if drone_z is not None else None
+            return offset_x, offset_y, offset_z
+
+        # Get drone data - PERBAIKAN DI SINI
+        drone_x, drone_y, drone_z, drone_yaw = None, None, None, None
         try:
-            if mode == 'landolt':
-                filename = f"{self.output_base}/landolt/images/landolt_cam{self.camera_id}_{timestamp}.jpg"
-                cv2.imwrite(filename, self.frozen_frame)
-                print(f"[CAM {self.camera_id}] Saved Landolt: {filename}")
+            # Gunakan get_latest() method yang benar
+            latest_record = self.drone_parser.get_latest()
             
-            elif mode == 'qr':
-                filename = f"{self.output_base}/qr/images/qr_cam{self.camera_id}_{timestamp}.jpg"
-                cv2.imwrite(filename, self.frozen_frame)
-                print(f"[CAM {self.camera_id}] Saved QR: {filename}")
-            
-            elif mode == 'hazmat':
-                filename = f"{self.output_base}/hazmat/images/hazmat_cam{self.camera_id}_{timestamp}.jpg"
-                cv2.imwrite(filename, self.frozen_frame)
-                print(f"[CAM {self.camera_id}] Saved Hazmat: {filename}")
-            
-            elif mode == 'crack' and self.current_crack_analysis:
-                capture_folder = f"{self.output_base}/crack/crack_capture_{timestamp}"
-                os.makedirs(capture_folder, exist_ok=True)
+            if latest_record:
+                # Ambil position dan rpy dari record
+                pos = self.drone_parser.get_position(latest_record)
+                rpy = self.drone_parser.get_rpy(latest_record)
                 
-                final_frame = self.current_crack_analysis['original_frame'].copy()
-                cv2.drawContours(final_frame, [self.current_crack_analysis['square']], -1, (0, 255, 0), 3)
-                cv2.putText(final_frame, f"CRACK CAPTURE CAM{self.camera_id}", 
-                           (10, final_frame.shape[0] - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                cv2.putText(final_frame, timestamp, 
-                           (10, final_frame.shape[0] - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                if pos:
+                    drone_x = pos['x']
+                    drone_y = pos['y']
+                    drone_z = pos['z']
+                    print(f"[CAM {self.camera_id}] ✓ Position: X={drone_x:.2f}, Y={drone_y:.2f}, Z={drone_z:.2f}")
+                else:
+                    print(f"[CAM {self.camera_id}] ⚠️ Position data not available")
                 
-                cv2.imwrite(f"{capture_folder}/crack_original_{timestamp}.jpg", final_frame)
+                if rpy:
+                    drone_yaw = rpy['yaw']  # in radians
+                    print(f"[CAM {self.camera_id}] ✓ Yaw: {drone_yaw:.3f} rad ({rpy['yaw_deg']:.1f}°)")
+                else:
+                    print(f"[CAM {self.camera_id}] ⚠️ Yaw data not available")
+            else:
+                print(f"[CAM {self.camera_id}] ⚠️ No telemetry data available at this moment")
                 
-                if 'display' in self.current_crack_analysis:
-                    cv2.imwrite(f"{capture_folder}/crack_analysis_{timestamp}.jpg", 
-                               self.current_crack_analysis['display'])
-                
-                self._save_crack_report(timestamp, capture_folder)
-                
-                print(f"[CAM {self.camera_id}] Saved Crack Analysis: {capture_folder}")
-            
-            elif mode == 'rust':
-                filename = f"{self.output_base}/rust/images/rust_cam{self.camera_id}_{timestamp}.jpg"
-                cv2.imwrite(filename, self.frozen_frame)
-                print(f"[CAM {self.camera_id}] Saved Rust: {filename}")
-            
-            elif mode == 'motion':
-                filename = f"{self.output_base}/motion/images/motion_cam{self.camera_id}_{timestamp}.jpg"
-                cv2.imwrite(filename, self.frozen_frame)
-                print(f"[CAM {self.camera_id}] Saved Motion: {filename}")
-            
+        except Exception as e:
+            logger.warning(f"[CAM {self.camera_id}] Could not get drone data: {e}")
+
+        # Calculate detection position
+        det_x, det_y, det_z = calculate_offset_position(drone_x, drone_y, drone_z, drone_yaw, offset_distance)
+        position_str = f"({det_x:.2f}, {det_y:.2f}, {det_z:.2f})" if det_x is not None else "(None, None, None)"
+
+        # Handle image saving + detection data
+        data_field = "N/A"
+        base_path = self.output_base
+
+        if mode == 'qr':
+            filename = f"{base_path}/qr/images/qr_cam{self.camera_id}_{timestamp}.jpg"
+            cv2.imwrite(filename, self.frozen_frame)
+            data_field = getattr(self, "current_qr_data", "Unknown QR")
+            print(f"[CAM {self.camera_id}] Saved QR: {filename}")
+
+        elif mode == 'crack' and self.current_crack_analysis:
+            capture_folder = f"{base_path}/crack/crack_capture_{timestamp}"
+            os.makedirs(capture_folder, exist_ok=True)
+            image_path = f"{capture_folder}/crack_original_{timestamp}.jpg"
+            cv2.imwrite(image_path, self.current_crack_analysis['original_frame'])
+            data_field = f"{self.current_crack_analysis.get('crack_length', 'Unknown')} cm"
+            print(f"[CAM {self.camera_id}] Saved Crack: {capture_folder}")
+
+        elif mode == 'rust':
+            filename = f"{base_path}/rust/images/rust_cam{self.camera_id}_{timestamp}.jpg"
+            cv2.imwrite(filename, self.frozen_frame)
+            data_field = getattr(self, "current_rust_degree", "Unknown Rust")
+            print(f"[CAM {self.camera_id}] Saved Rust: {filename}")
+
+        elif mode == 'hazmat':
+            filename = f"{base_path}/hazmat/images/hazmat_cam{self.camera_id}_{timestamp}.jpg"
+            cv2.imwrite(filename, self.frozen_frame)
+            data_field = getattr(self, "current_hazmat_type", "Unknown Hazmat")
+            print(f"[CAM {self.camera_id}] Saved Hazmat: {filename}")
+
+        elif mode == 'motion':
+            filename = f"{base_path}/motion/images/motion_cam{self.camera_id}_{timestamp}.jpg"
+            cv2.imwrite(filename, self.frozen_frame)
+            data_field = getattr(self, "current_motion_dir", "Unknown")
+            print(f"[CAM {self.camera_id}] Saved Motion: {filename}")
+
+        elif mode == 'landolt':
+            filename = f"{base_path}/landolt/images/landolt_cam{self.camera_id}_{timestamp}.jpg"
+            cv2.imwrite(filename, self.frozen_frame)
+            data_field = getattr(self, "current_landolt_type", "Unknown")
+            print(f"[CAM {self.camera_id}] Saved Landolt: {filename}")
+
+        else:
+            filename = f"{base_path}/unknown/images/unknown_cam{self.camera_id}_{timestamp}.jpg"
+            cv2.imwrite(filename, self.frozen_frame)
+
+        # Unified CSV logging
+        csv_file = f"ai/detections_unified.csv"
+        file_exists = os.path.isfile(csv_file)
+        row = {
+            'timestamp': timestamp,
+            'camera_id': f"cam{self.camera_id}",
+            'detection_type': mode,
+            'color': color_map.get(mode, 'gray'),
+            'position': position_str,
+            'data': str(data_field)
+        }
+
+        try:
+            with open(csv_file, 'a', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=['timestamp', 'camera_id', 'detection_type', 'color', 'position', 'data'])
+                if not file_exists:
+                    writer.writeheader()
+                writer.writerow(row)
+
+            print(f"[CAM {self.camera_id}] ✅ Logged unified detection to CSV: {csv_file}")
+            print(f"  → Position: {position_str}, Data: {data_field}")
+
             self.unfreeze()
             return True
+
         except Exception as e:
-            logger.error(f"[CAM {self.camera_id}] Save error: {e}")
+            logger.error(f"[CAM {self.camera_id}] CSV save error: {e}")
             return False
+
     
     def freeze(self, frame):
         self.is_frozen = True
