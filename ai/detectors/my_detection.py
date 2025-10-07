@@ -1,3 +1,5 @@
+# ai/detectors/my_detection.py
+
 import sys
 import os
 import cv2
@@ -399,6 +401,627 @@ class QRDetector3D:
             return []
 
 # ============================================================================
+# MOTION DATA CLASS
+# ============================================================================
+
+class DotOnPlateTracker:
+    def __init__(self, camera_id, output_base):
+        """
+        Dot-on-Plate tracker (Canny + inner-contour marker) with motion detection
+        """
+        self.camera_id = camera_id
+        self.output_base = output_base
+        
+        # Create directories
+        os.makedirs(f"{output_base}/images", exist_ok=True)
+        os.makedirs(f"{output_base}/analytics", exist_ok=True)
+        
+        # Frame dimensions
+        self.frame_width = 640
+        self.frame_height = 480
+
+        # --- Motion Detection State ---
+        self.motion_detection_mode = True
+        self.angle_buffer = []
+        self.motion_buffer_size = 15
+        self.motion_threshold_deg = 8.0
+        self.motion_speed_threshold = 3.0
+        self.stable_frames_to_stop = 45
+        self.stable_frame_count = 0
+        self.motion_confirmation_count = 0
+        self.motion_confirmation_required = 5
+        self.noise_filter_threshold = 0.5
+
+        # --- Tracking state ---
+        self.previous_angle = None
+        self.total_rotation = 0.0
+        self.rotation_history = []
+        self.plate_center = None
+        self.plate_radius = None
+
+        # --- Canny/contour params ---
+        self.min_area = 50
+        self.min_circularity = 0.80
+        self.canny_low = 0
+        self.canny_high = 122
+        self.blur_ksize = 7
+
+        # --- Inner contour (marker) detection params ---
+        self.inner_min_area = 5
+
+        # --- Direction hysteresis + stability ---
+        self.direction = "Stable"
+        self.dir_cum_delta_deg = 0.0
+        self.dir_threshold_deg = 5.0
+        self.stable_speed_deg_s = 2.0
+        self.per_frame_epsilon_deg = 0.3
+
+        # --- Debug/terminal state ---
+        self.is_tracking = False
+        self.last_direction_print = None
+
+        # --- Auto Save & Analytics ---
+        self.auto_save_enabled = True
+        self.save_counter = 0
+        self.last_save_time = 0
+        self.save_interval = 2.0
+        
+        # --- Camera & Position Parameters ---
+        self.camera_height = 1.500
+        self.assumed_plate_diameter = 0.200
+        self.camera_focal_length_px = 500
+        
+        print(f"[CAM {camera_id}] Motion Tracker initialized - Output: {output_base}")
+
+    def detect_motion(self, current_angle, current_time):
+        """Detect if object is actually rotating based on angle history"""
+        if len(self.angle_buffer) > 0:
+            last_angle = self.angle_buffer[-1][0]
+            angle_diff = current_angle - last_angle
+            
+            if angle_diff > math.pi:
+                angle_diff -= 2 * math.pi
+            elif angle_diff < -math.pi:
+                angle_diff += 2 * math.pi
+            
+            if abs(math.degrees(angle_diff)) < self.noise_filter_threshold:
+                current_angle = last_angle
+        
+        self.angle_buffer.append((current_angle, current_time))
+        
+        if len(self.angle_buffer) > self.motion_buffer_size:
+            self.angle_buffer.pop(0)
+        
+        if len(self.angle_buffer) < 8:
+            self.motion_confirmation_count = 0
+            return False
+        
+        first_angle = self.angle_buffer[0][0]
+        last_angle = self.angle_buffer[-1][0]
+        
+        angle_diff = last_angle - first_angle
+        if angle_diff > math.pi:
+            angle_diff -= 2 * math.pi
+        elif angle_diff < -math.pi:
+            angle_diff += 2 * math.pi
+        
+        total_rotation_deg = abs(math.degrees(angle_diff))
+        
+        time_diff = self.angle_buffer[-1][1] - self.angle_buffer[0][1]
+        avg_speed = total_rotation_deg / time_diff if time_diff > 0 else 0
+        
+        recent_speed = 0
+        if len(self.angle_buffer) >= 5:
+            recent_first = self.angle_buffer[-5][0]
+            recent_last = self.angle_buffer[-1][0]
+            recent_diff = recent_last - recent_first
+            if recent_diff > math.pi:
+                recent_diff -= 2 * math.pi
+            elif recent_diff < -math.pi:
+                recent_diff += 2 * math.pi
+            recent_rotation = abs(math.degrees(recent_diff))
+            recent_time_diff = self.angle_buffer[-1][1] - self.angle_buffer[-5][1]
+            recent_speed = recent_rotation / recent_time_diff if recent_time_diff > 0 else 0
+        
+        motion_detected = ((total_rotation_deg > self.motion_threshold_deg and 
+                           avg_speed > self.motion_speed_threshold) or
+                          recent_speed > (self.motion_speed_threshold * 2))
+        
+        if motion_detected:
+            self.motion_confirmation_count += 1
+        else:
+            self.motion_confirmation_count = 0
+        
+        return self.motion_confirmation_count >= self.motion_confirmation_required
+
+    def check_motion_stopped(self, rotation_speed):
+        """Check if motion has stopped"""
+        if abs(rotation_speed) < (self.stable_speed_deg_s * 0.5):
+            self.stable_frame_count += 1
+        else:
+            self.stable_frame_count = 0
+        
+        return self.stable_frame_count >= self.stable_frames_to_stop
+
+    def calculate_world_position(self, plate_center, plate_radius_px, dot_center):
+        """Calculate real world position in meters"""
+        if plate_center is None or dot_center is None:
+            return None
+            
+        cx, cy = plate_center
+        dx, dy = dot_center
+        
+        distance_to_plate = (self.assumed_plate_diameter * self.camera_focal_length_px) / (2 * plate_radius_px)
+        
+        center_offset_px = cx - (self.frame_width / 2)
+        horizontal_distance = (center_offset_px * distance_to_plate) / self.camera_focal_length_px
+        
+        vertical_offset_px = (self.frame_height / 2) - cy
+        vertical_angle = math.atan(vertical_offset_px / self.camera_focal_length_px)
+        height_from_camera = distance_to_plate * math.tan(vertical_angle)
+        height_from_ground = self.camera_height + height_from_camera
+        
+        horizontal_angle = math.degrees(math.atan(horizontal_distance / distance_to_plate))
+        vertical_angle_deg = math.degrees(vertical_angle)
+        
+        return {
+            'x_distance': distance_to_plate,
+            'y_horizontal': horizontal_distance,
+            'z_height': height_from_ground,
+            'horizontal_angle': horizontal_angle,
+            'vertical_angle': vertical_angle_deg,
+            'plate_diameter': self.assumed_plate_diameter
+        }
+
+    def save_detection_data(self, frame, plate_info, dot_center, angle_rad, rotation_speed, world_pos):
+        """Save screenshot with FULL VISUAL OVERLAY like the example image"""
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Create annotated frame with ALL visual elements
+        annotated_frame = frame.copy()
+        
+        # Draw plate circle (green)
+        if plate_info:
+            center = (plate_info[0], plate_info[1])
+            radius = plate_info[2]
+            cv2.circle(annotated_frame, center, radius, (0, 255, 0), 3)
+            cv2.circle(annotated_frame, center, 3, (0, 255, 0), -1)
+        
+        # Draw marker dot (blue) and orientation arrow
+        if dot_center and plate_info:
+            # Blue dot at marker
+            cv2.circle(annotated_frame, dot_center, 8, (255, 0, 0), -1)
+            
+            # Magenta line from center to marker
+            cv2.arrowedLine(annotated_frame, center, dot_center, 
+                           (255, 0, 255), 4, tipLength=0.3)
+            
+            # Yellow orientation arrow from marker
+            arrow_length = 50
+            end_x = int(dot_center[0] + arrow_length * math.cos(angle_rad))
+            end_y = int(dot_center[1] + arrow_length * math.sin(angle_rad))
+            cv2.arrowedLine(annotated_frame, dot_center, (end_x, end_y), 
+                           (0, 255, 255), 3, tipLength=0.3)
+        
+        # Calculate linear speed
+        estimated_radius = self.assumed_plate_diameter / 2
+        linear_speed = math.radians(rotation_speed) * estimated_radius
+        
+        # Add BLACK INFO BOX with text overlay (bottom-left corner)
+        info_lines = [
+            f"Mode: TRACKING AKTIF",
+            f"Current Angle: {math.degrees(angle_rad):.2f}°",
+            f"Total Rotation: {math.degrees(self.total_rotation):.2f}°",
+            f"Speed: {linear_speed:.1f} m/s",
+            f"Direction: {self.direction}",
+            f"Stable Count: {self.stable_frame_count}/{self.stable_frames_to_stop}"
+        ]
+        
+        if world_pos:
+            info_lines.extend([
+                f"Distance: {world_pos['x_distance']:.3f}m",
+                f"Y-Offset: {world_pos['y_horizontal']:+.3f}m",
+                f"Height: {world_pos['z_height']:.3f}m"
+            ])
+        
+        info_lines.append(f"Auto-Save: ON ({self.save_counter + 1})")
+        
+        # Draw black background box
+        text_bg_height = len(info_lines) * 15 + 6
+        panel_width = 250
+        panel_y_start = self.frame_height - text_bg_height - 10
+        cv2.rectangle(annotated_frame, (10, panel_y_start), 
+                     (panel_width, self.frame_height - 10), (0, 0, 0), -1)
+        cv2.rectangle(annotated_frame, (10, panel_y_start), 
+                     (panel_width, self.frame_height - 10), (255, 255, 255), 1)
+        
+        # Draw text lines
+        for i, text in enumerate(info_lines):
+            text_y = panel_y_start + 14 + i * 15
+            cv2.putText(annotated_frame, text, (15, text_y), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1)
+        
+        # Add green "Baterei_Motionon | Saved: X" text at top-left
+        status_text = f"Baterei_Motion | Saved: {self.save_counter + 1}"
+        cv2.putText(annotated_frame, status_text, (10, 25),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        
+        # Save the annotated screenshot
+        screenshot_path = os.path.join(self.output_base, "images", 
+                                      f"motion_cam{self.camera_id}_{timestamp}_{self.save_counter:04d}.jpg")
+        cv2.imwrite(screenshot_path, annotated_frame)
+        
+        # Save analytics text file
+        analytics_path = os.path.join(self.output_base, "analytics",
+                                     f"motion_cam{self.camera_id}_{timestamp}_{self.save_counter:04d}.txt")
+        
+        with open(analytics_path, 'w', encoding='utf-8') as f:
+            f.write("DOT-ON-PLATE TRACKING ANALYSIS\n")
+            f.write("=" * 50 + "\n")
+            f.write(f"Camera: {self.camera_id}\n")
+            f.write(f"Timestamp: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Detection ID: {self.save_counter + 1:04d}\n\n")
+            
+            f.write("POSITION ANALYSIS (in METERS from ground level 0,0):\n")
+            if world_pos:
+                f.write(f"X - Distance from Camera: {world_pos['x_distance']:.3f} m\n")
+                if world_pos['y_horizontal'] >= 0:
+                    f.write(f"Y - Horizontal Distance: {world_pos['y_horizontal']:.3f} m (Right)\n")
+                else:
+                    f.write(f"Y - Horizontal Distance: {abs(world_pos['y_horizontal']):.3f} m (Left)\n")
+                f.write(f"Z - Height from Ground: {world_pos['z_height']:.3f} m\n")
+                f.write(f"Camera Height: {self.camera_height:.3f} m (above ground)\n")
+                f.write(f"Detected Plate Diameter: {world_pos['plate_diameter']:.3f} m\n")
+                f.write(f"Horizontal Angle: {world_pos['horizontal_angle']:.1f}°\n")
+                f.write(f"Vertical Angle: {world_pos['vertical_angle']:.1f}°\n\n")
+            
+            f.write("ROTATION ANALYSIS:\n")
+            f.write(f"Current Angle: {math.degrees(angle_rad):.1f}°\n")
+            f.write(f"Total Rotation: {math.degrees(self.total_rotation):.1f}°\n")
+            f.write(f"Rotation Speed: {linear_speed:.1f} m/s\n")
+            f.write(f"Direction: {self.direction}\n\n")
+            
+            if plate_info:
+                f.write("DETECTION DETAILS:\n")
+                f.write(f"Plate Center (pixels): ({plate_info[0]}, {plate_info[1]})\n")
+                f.write(f"Plate Radius (pixels): {plate_info[2]}\n")
+            
+            if dot_center:
+                f.write(f"Marker Center (pixels): ({dot_center[0]}, {dot_center[1]})\n")
+            
+            f.write(f"Frame Size: {self.frame_width} x {self.frame_height}\n")
+            f.write(f"Camera Focal Length (est.): {self.camera_focal_length_px} pixels\n")
+        
+        self.save_counter += 1
+        print(f"\n[CAM {self.camera_id}] MOTION SAVED #{self.save_counter}")
+        print(f"  Image: {screenshot_path}")
+        print(f"  Analytics: {analytics_path}")
+
+    # ... rest of the class methods remain the same (detect_plates_canny, detect_marker_in_plate, 
+    # calculate_rotation_speed, process_frame, reset_tracking, annotate_frame)
+    def detect_plates_canny(self, frame):
+        """Detect circular plates using Canny edge detection"""
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (self.blur_ksize, self.blur_ksize), 2)
+        edges = cv2.Canny(blurred, self.canny_low, self.canny_high)
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        candidates = []
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area < self.min_area:
+                continue
+            (x, y), radius = cv2.minEnclosingCircle(cnt)
+            peri = cv2.arcLength(cnt, True)
+            if peri == 0:
+                continue
+            circularity = 4 * math.pi * area / (peri * peri)
+            if circularity < self.min_circularity:
+                continue
+            score = circularity * area
+            candidates.append((int(x), int(y), int(radius), score))
+        candidates.sort(key=lambda t: t[3], reverse=True)
+        return candidates
+
+    def detect_marker_in_plate(self, frame, plate_info):
+        """Detect marker inside the plate"""
+        if plate_info is None:
+            return None
+
+        cx, cy, r = plate_info
+        h, w = frame.shape[:2]
+
+        # Extract ROI
+        x0 = max(0, cx - r)
+        y0 = max(0, cy - r)
+        x1 = min(w, cx + r)
+        y1 = min(h, cy + r)
+        roi = frame[y0:y1, x0:x1]
+
+        # Circular mask
+        plate_mask = np.zeros(roi.shape[:2], dtype=np.uint8)
+        cv2.circle(plate_mask, (cx - x0, cy - y0), max(1, r - 2), 255, -1)
+
+        # Edges inside ROI
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (self.blur_ksize, self.blur_ksize), 0)
+        edges = cv2.Canny(gray, self.canny_low, self.canny_high)
+        edges_in_plate = cv2.bitwise_and(edges, edges, mask=plate_mask)
+
+        # Close gaps
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        edges_in_plate = cv2.morphologyEx(edges_in_plate, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+        contours, _ = cv2.findContours(edges_in_plate, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None
+
+        max_allowed_area = 0.5 * math.pi * (r ** 2)
+
+        best_cnt = None
+        best_area = 0.0
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area < self.inner_min_area or area > max_allowed_area:
+                continue
+            if area > best_area:
+                best_area = area
+                best_cnt = cnt
+
+        if best_cnt is None:
+            return None
+
+        M = cv2.moments(best_cnt)
+        if M["m00"] == 0:
+            return None
+
+        mx = int(M["m10"] / M["m00"]) + x0
+        my = int(M["m01"] / M["m00"]) + y0
+        return (mx, my)
+
+    def calculate_rotation_speed(self, current_angle):
+        """Calculate rotation speed in degrees per second"""
+        if len(self.rotation_history) < 2:
+            return 0.0
+        time_diff = self.rotation_history[-1][1] - self.rotation_history[-2][1]
+        angle_diff = current_angle - self.rotation_history[-2][0]
+        # unwrap
+        if angle_diff > math.pi:
+            angle_diff -= 2 * math.pi
+        elif angle_diff < -math.pi:
+            angle_diff += 2 * math.pi
+        return math.degrees(angle_diff) / time_diff if time_diff > 0 else 0.0
+
+    def process_frame(self, frame):
+        """Process single frame and return tracking data"""
+        current_time = time.time()
+
+        # Detect circular plate candidates
+        candidates = self.detect_plates_canny(frame)
+
+        dot_center = None
+        plate_info = None
+        angle = 0.0
+        rotation_speed = 0.0
+        world_pos = None
+
+        # Find plate with marker
+        for (x, y, r, _score) in candidates:
+            maybe_plate = (x, y, r)
+            candidate_marker = self.detect_marker_in_plate(frame, maybe_plate)
+            if candidate_marker is not None:
+                plate_info = maybe_plate
+                dot_center = candidate_marker
+                break
+
+        # Process based on current mode
+        if plate_info is not None and dot_center is not None:
+            cx, cy, r = plate_info
+            px, py = dot_center
+            angle = math.atan2(py - cy, px - cx)
+
+            if self.motion_detection_mode:
+                # Check for rotation
+                motion_detected = self.detect_motion(angle, current_time)
+                if motion_detected:
+                    print(f"[CAM {self.camera_id}] Motion detected! Starting tracking...")
+                    self.motion_detection_mode = False
+                    self.is_tracking = True
+                    self.previous_angle = angle
+                    self.total_rotation = 0.0
+                    self.rotation_history = [(angle, current_time)]
+                    self.direction = "Stable"
+                    self.dir_cum_delta_deg = 0.0
+                    self.stable_frame_count = 0
+                    self.tracking_start_time = current_time  # Mark when tracking started
+            else:
+                # Tracking mode
+                world_pos = self.calculate_world_position((cx, cy), r, (px, py))
+
+                if self.previous_angle is not None:
+                    angle_diff = angle - self.previous_angle
+                    if angle_diff > math.pi:
+                        angle_diff -= 2 * math.pi
+                    elif angle_diff < -math.pi:
+                        angle_diff += 2 * math.pi
+                    self.total_rotation += angle_diff
+
+                    deg_diff = math.degrees(angle_diff)
+                    if abs(deg_diff) < self.per_frame_epsilon_deg:
+                        deg_diff = 0.0
+                    self.dir_cum_delta_deg += deg_diff
+
+                    self.rotation_history.append((angle, current_time))
+                    if len(self.rotation_history) > 10:
+                        self.rotation_history.pop(0)
+                    rotation_speed = self.calculate_rotation_speed(angle)
+
+                    if (abs(rotation_speed) < self.stable_speed_deg_s and
+                            abs(self.dir_cum_delta_deg) < self.dir_threshold_deg):
+                        self.direction = "Stable"
+                    else:
+                        if self.dir_cum_delta_deg >= self.dir_threshold_deg:
+                            self.direction = "Clockwise"
+                            self.dir_cum_delta_deg = 0.0
+                        elif self.dir_cum_delta_deg <= -self.dir_threshold_deg:
+                            self.direction = "CounterClockwise"
+                            self.dir_cum_delta_deg = 0.0
+
+                    # Check if motion stopped
+                    if self.check_motion_stopped(rotation_speed):
+                        print(f"[CAM {self.camera_id}] Motion stopped. Returning to motion detection mode...")
+                        self.reset_tracking()
+
+                else:
+                    self.rotation_history.append((angle, current_time))
+                    if len(self.rotation_history) > 10:
+                        self.rotation_history.pop(0)
+
+                self.previous_angle = angle
+
+                # Auto-save
+                if (self.auto_save_enabled and 
+                    current_time - self.last_save_time > self.save_interval):
+                    self.save_detection_data(frame, plate_info, dot_center, angle, 
+                                           rotation_speed, world_pos)
+                    self.last_save_time = current_time
+
+        else:
+            # No detection
+            if not self.motion_detection_mode:
+                self.stable_frame_count += 1
+                if self.stable_frame_count >= self.stable_frames_to_stop:
+                    print(f"[CAM {self.camera_id}] Lost detection. Returning to motion detection mode...")
+                    self.reset_tracking()
+
+        return {
+            'plate_info': plate_info,
+            'dot_center': dot_center,
+            'angle': angle,
+            'rotation_speed': rotation_speed,
+            'world_pos': world_pos,
+            'direction': self.direction,
+            'total_rotation': self.total_rotation,
+            'is_tracking': not self.motion_detection_mode
+        }
+
+    def reset_tracking(self):
+        """Reset all tracking state"""
+        self.motion_detection_mode = True
+        self.is_tracking = False
+        self.angle_buffer = []
+        self.previous_angle = None
+        self.total_rotation = 0.0
+        self.rotation_history = []
+        self.direction = "Stable"
+        self.dir_cum_delta_deg = 0.0
+        self.stable_frame_count = 0
+        self.last_direction_print = None
+        self.motion_confirmation_count = 0
+
+    def annotate_frame(self, frame, tracking_data):
+        """Draw tracking information on frame"""
+        annotated = frame.copy()
+        
+        plate_info = tracking_data['plate_info']
+        dot_center = tracking_data['dot_center']
+        angle = tracking_data['angle']
+        rotation_speed = tracking_data['rotation_speed']
+        world_pos = tracking_data['world_pos']
+        is_tracking = tracking_data['is_tracking']
+        
+        # Header
+        if not is_tracking:
+            header_text = "Menunggu Rotasi..."
+            header_color = (0, 255, 255)
+            cv2.putText(annotated, header_text, (10, 25), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, header_color, 2)
+            
+            # Minimal info panel
+            info_text = [
+                "Mode: MENUNGGU ROTASI",
+                "Status: Tidak Ada Deteksi",
+                "Mulai putar objek untuk tracking"
+            ]
+            
+            text_bg_height = len(info_text) * 15 + 6
+            panel_width = 250
+            panel_y_start = self.frame_height - text_bg_height - 10
+            cv2.rectangle(annotated, (10, panel_y_start), 
+                         (panel_width, self.frame_height - 10), (0, 0, 0), -1)
+            cv2.rectangle(annotated, (10, panel_y_start), 
+                         (panel_width, self.frame_height - 10), (255, 255, 255), 1)
+            for i, text in enumerate(info_text):
+                text_y = panel_y_start + 14 + i * 15
+                cv2.putText(annotated, text, (15, text_y), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1)
+            
+            return annotated
+        
+        # Tracking mode - draw detection visuals
+        header_text = "Deteksi Motion"
+        header_color = (0, 255, 0)
+        cv2.putText(annotated, header_text, (10, 25), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, header_color, 2)
+        
+        if plate_info is not None:
+            center = (plate_info[0], plate_info[1])
+            radius = plate_info[2]
+            cv2.circle(annotated, center, radius, (0, 255, 0), 2)
+            cv2.circle(annotated, center, 3, (0, 255, 0), -1)
+            self.plate_center = center
+            self.plate_radius = radius
+            
+        if dot_center is not None:
+            cv2.circle(annotated, dot_center, 8, (255, 0, 0), -1)
+            if self.plate_center is not None:
+                cv2.arrowedLine(annotated, self.plate_center, dot_center, 
+                               (255, 0, 255), 4, tipLength=0.3)
+                
+                # Orientation arrow
+                arrow_length = 50
+                end_x = int(dot_center[0] + arrow_length * math.cos(angle))
+                end_y = int(dot_center[1] + arrow_length * math.sin(angle))
+                cv2.arrowedLine(annotated, dot_center, (end_x, end_y), 
+                               (0, 255, 255), 3, tipLength=0.3)
+
+        # Info panel
+        estimated_radius = self.assumed_plate_diameter / 2
+        linear_speed = math.radians(rotation_speed) * estimated_radius
+        
+        info_text = [
+            "Mode: TRACKING AKTIF",
+            f"Current Angle: {math.degrees(angle):.1f}°",
+            f"Total Rotation: {math.degrees(self.total_rotation):.1f}°", 
+            f"Speed: {linear_speed:.1f} m/s",
+            f"Direction: {self.direction}",
+            f"Stable Count: {self.stable_frame_count}/{self.stable_frames_to_stop}"
+        ]
+        
+        if world_pos:
+            info_text.extend([
+                f"Distance: {world_pos['x_distance']:.3f}m",
+                f"Y-Offset: {world_pos['y_horizontal']:.3f}m",
+                f"Height: {world_pos['z_height']:.3f}m"
+            ])
+        
+        if self.auto_save_enabled:
+            info_text.append(f"Auto-Save: ON ({self.save_counter})")
+        
+        text_bg_height = len(info_text) * 15 + 6
+        panel_width = 250
+        panel_y_start = self.frame_height - text_bg_height - 10
+        cv2.rectangle(annotated, (10, panel_y_start), 
+                     (panel_width, self.frame_height - 10), (0, 0, 0), -1)
+        cv2.rectangle(annotated, (10, panel_y_start), 
+                     (panel_width, self.frame_height - 10), (255, 255, 255), 1)
+        for i, text in enumerate(info_text):
+            text_y = panel_y_start + 14 + i * 15
+            cv2.putText(annotated, text, (15, text_y), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1)
+        
+        return annotated
+
+# ============================================================================
 # CRACK DATA CLASS
 # ============================================================================
 
@@ -576,16 +1199,14 @@ class SharedModelManager:
 # ============================================================================
 
 class CameraWorker:
-    """Enhanced worker with Landolt, QR 3D, Hazmat, Crack, and FULL Rust detection"""
+    """Enhanced worker with Landolt, QR 3D, Hazmat, Crack, Rust, and FULL Motion detection"""
     
     def __init__(self, camera_id: int, shared_models: SharedModelManager, output_base='ai_captures'):
         self.camera_id = camera_id
         self.models = shared_models
         self.output_base = f"{output_base}_cam{camera_id}"
         self.device = gpu_manager.device
-        
-        self.drone_parser = DroneParser(port=8889)
-        self.drone_parser.start()
+        self.drone_parser = DroneParser()
         
         # LANDOLT PARAMETERS
         self.dp = 1.0
@@ -598,7 +1219,7 @@ class CameraWorker:
         # Camera Analytics
         self.camera_analytics = CameraAnalytics(frame_width=640, frame_height=480)
         
-        # QR DETECTOR 3D - ENHANCED
+        # QR DETECTOR 3D
         qr_output = f"{self.output_base}/qr"
         self.qr_detector_3d = QRDetector3D(
             camera_id=camera_id,
@@ -607,7 +1228,14 @@ class CameraWorker:
             camera_height=1.0
         )
         
-        # Tracking parameters
+        # MOTION TRACKER - FULL IMPLEMENTATION
+        motion_output = f"{self.output_base}/motion"
+        self.motion_tracker = DotOnPlateTracker(
+            camera_id=camera_id,
+            output_base=motion_output
+        )
+        
+        # Tracking parameters (Landolt)
         self.max_tracking_history = 5
         self.position_smoothing = 0.3
         self.confidence_threshold = 0.35
@@ -658,17 +1286,15 @@ class CameraWorker:
         self.CAMERA_FOV_V = 45.0
         self.DETECTED_SQUARE_SIZE = 0.100
         
-        # RUST DETECTION PARAMETERS - FULL IMPLEMENTATION
+        # RUST DETECTION PARAMETERS
         self.RUST_WARP_SIZE = 300
         self.RUST_NUM_CLASSES = 4
         self.rust_class_colors = {1: (0, 255, 0), 2: (0, 255, 255), 3: (0, 0, 255)}
         
-        # Rust camera parameters
         self.RUST_CAMERA_FOCAL_LENGTH = 800
-        self.RUST_REAL_SQUARE_SIZE = 0.10  # 10cm
-        self.RUST_CAMERA_HEIGHT = 1.5  # 1.5m from ground
+        self.RUST_REAL_SQUARE_SIZE = 0.10
+        self.RUST_CAMERA_HEIGHT = 1.5
         
-        # Rust detection tracking
         self.rust_results_data = []
         self.rust_position_data = None
         self.rust_detection_count = {}
@@ -706,7 +1332,6 @@ class CameraWorker:
         os.makedirs(f"{self.output_base}/crack", exist_ok=True)
         os.makedirs(f"{self.output_base}/rust/images", exist_ok=True)
         os.makedirs(f"{self.output_base}/rust/analytics", exist_ok=True)
-        os.makedirs(f"{self.output_base}/motion/images", exist_ok=True)
         
         # State
         self._landolt_tracking = []
@@ -1143,51 +1768,15 @@ class CameraWorker:
             self.saved_positions.add(position_key)
             self.save_counter += 1
             
-            print(f"\n[CAM {self.camera_id}] AUTO SAVE #{self.save_counter}")
+            print(f"\n[CAM {self.camera_id}] LANDOLT AUTO SAVE #{self.save_counter}")
             print(f"  Image: {img_path}")
             print(f"  Data: {data_path}")
-            print(f"  3D: X={result.get('x_distance', 0):.3f}m, Y={result.get('y_lateral', 0):.3f}m, Z={result.get('z_height', 0):.3f}m")
-            if result['id_text']:
-                print(f"  ID: {result['id_text']} (Conf: {result['id_confidence']:.3f})")
             
             return True
             
         except Exception as e:
             logger.error(f"[CAM {self.camera_id}] Auto save failed: {e}")
             return False
-    
-    def _save_analytics_to_file(self, results, frame_count, fps):
-        try:
-            with open(self.analytics_file, 'w') as f:
-                f.write(f"=== LANDOLT RING CAMERA ANALYTICS (CAM {self.camera_id}) ===\n")
-                f.write(f"Timestamp: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"Frame: {frame_count}\n")
-                f.write(f"FPS: {fps:.1f}\n")
-                f.write(f"Calibration: {'CALIBRATED' if self.camera_analytics.is_calibrated else 'ESTIMATED'}\n")
-                f.write(f"Auto Save: {'ON' if self.auto_save_enabled else 'OFF'}\n")
-                f.write(f"Saves: {self.save_counter}/{self.max_saves_per_session}\n")
-                f.write("=" * 60 + "\n\n")
-                
-                if not results:
-                    f.write("STATUS: No Landolt Ring detected\n")
-                else:
-                    f.write(f"STATUS: {len(results)} Ring(s) detected\n\n")
-                    
-                    for i, result in enumerate(results):
-                        f.write(f"--- RING #{i+1} ---\n")
-                        f.write(f"Position: ({result['ring_x']}, {result['ring_y']})\n")
-                        f.write(f"Confidence: {result['ring_confidence']:.4f}\n")
-                        f.write(f"Tracking: {result['frames_tracked']} frames\n")
-                        
-                        if result['id_text']:
-                            f.write(f"ID: {result['id_text']} (Conf: {result['id_confidence']:.4f})\n")
-                        else:
-                            f.write(f"ID: Not detected\n")
-                        
-                        f.write(f"3D: X={result['x_distance']:.3f}m, Y={result['y_lateral']:+.3f}m, Z={result['z_height']:+.3f}m\n")
-                        f.write(f"Direction: {result.get('direction', 'unknown').upper()}\n\n")
-        except Exception as e:
-            logger.error(f"[CAM {self.camera_id}] Analytics save error: {e}")
     
     def process_landolt(self, frame):
         self.frame_count += 1
@@ -1325,10 +1914,6 @@ class CameraWorker:
                 info_text += f" | Auto-Save: ON ({self.save_counter}/{self.max_saves_per_session})"
             cv2.putText(annotated, info_text, (10, info_y),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            
-            cv2.putText(annotated, f"Analytics -> {self.analytics_file}", 
-                       (10, info_y + 25),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
         
         return annotated
     
@@ -1395,9 +1980,30 @@ class CameraWorker:
                            (10, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
         
         return annotated
-    
+
     # ========================================================================
-    # HAZMAT DETECTION (abbreviated - keeping existing)
+    # MOTION DETECTION - FULL IMPLEMENTATION
+    # ========================================================================
+    
+    def process_motion(self, frame):
+        """Process motion detection using full DotOnPlateTracker"""
+        tracking_data = self.motion_tracker.process_frame(frame)
+        self.current_motion_data = tracking_data
+        return tracking_data
+    
+    def annotate_motion(self, frame, tracking_data):
+        """Annotate frame with motion tracking data"""
+        if tracking_data is None:
+            annotated = frame.copy()
+            cv2.putText(annotated, f"CAM {self.camera_id} - MOTION (No Detection)", 
+                       (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            return annotated
+        
+        annotated = self.motion_tracker.annotate_frame(frame, tracking_data)
+        return annotated
+        
+    # ========================================================================
+    # HAZMAT DETECTION
     # ========================================================================
     
     def _calculate_hazmat_real_world_coordinates(self, box):
@@ -1454,14 +2060,7 @@ class CameraWorker:
                 f.write(f"Camera: {self.camera_id}\n")
                 f.write(f"Timestamp: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                 f.write(f"Image File: {image_filename}\n")
-                f.write(f"Frame Size: {self.frame_width}x{self.frame_height}\n")
                 f.write(f"Total Objects Detected: {len(detections_data)}\n")
-                f.write("=" * 60 + "\n")
-                f.write("Coordinate System (dalam meter):\n")
-                f.write("X: Distance from camera (m)\n")
-                f.write("Y: Horizontal position (- Left, + Right)\n")
-                f.write("Z: Height from ground surface (m)\n")
-                f.write(f"Camera Height: {self.HAZMAT_CAMERA_HEIGHT}m\n")
                 f.write("=" * 60 + "\n\n")
                 
                 for i, detection in enumerate(detections_data, 1):
@@ -1473,18 +2072,9 @@ class CameraWorker:
                     f.write(f"    Distance X: {detection['distance_x']:.2f}m\n")
                     f.write(f"    Position Y: {detection['position_y']:+.2f}m\n")
                     f.write(f"    Height Z: {detection['height_z']:.2f}m\n")
-                    f.write(f"    Horizontal Angle: {detection['horizontal_angle']:+.1f}°\n")
-                    f.write(f"    Vertical Angle: {detection['vertical_angle']:+.1f}°\n")
-                    
-                    bbox = detection['bounding_box']
-                    f.write(f"    Bounding Box: [{bbox['x1']}, {bbox['y1']}, {bbox['x2']}, {bbox['y2']}]\n")
                     f.write("-" * 40 + "\n\n")
             
-            print(f"[CAM {self.camera_id}] Saved Hazmat:")
-            print(f"  Image: {image_filename}")
-            print(f"  Analytics: {analytics_filename}")
-            print(f"  Objects: {len(detections_data)}")
-            
+            print(f"[CAM {self.camera_id}] Saved Hazmat: {image_filename}")
             return True
         except Exception as e:
             logger.error(f"[CAM {self.camera_id}] Hazmat save error: {e}")
@@ -1538,9 +2128,7 @@ class CameraWorker:
                             "vertical_angle": vertical_angle,
                             "direction": direction,
                             "bounding_box": {
-                                "x1": x1, "y1": y1, "x2": x2, "y2": y2,
-                                "width": x2-x1, "height": y2-y1,
-                                "center_x": (x1+x2)//2, "center_y": (y1+y2)//2
+                                "x1": x1, "y1": y1, "x2": x2, "y2": y2
                             }
                         }
                         detections_to_save.append(detection_data)
@@ -2175,16 +2763,25 @@ class CameraWorker:
             return False
     
     # ========================================================================
-    # MOTION DETECTION
-    # ========================================================================
-    
-    def process_motion(self, frame):
-        self.current_motion_data = None
-        return None
-    
-    # ========================================================================
     # SAVE FUNCTIONALITY
     # ========================================================================
+    def update_position_display(self, position):
+        """Update position-related UI elements."""
+        if not position:
+            return
+            
+        try:
+            # Update position labels
+            self.ui.DronePositionX.setText(f"[{position['x']:.2f}] m")
+            self.ui.DronePositionY.setText(f"[{position['y']:.2f}] m") 
+            self.ui.DroneHeight.setText(f"{position['z']:.2f} meter")
+            
+            # Update altitude slider (scale for 0-300 range)
+            altitude_value = int(max(0, min(300, abs(position['z']) * 10)))
+            self.ui.DroneAltitude.setValue(altitude_value)
+            
+        except Exception as e:
+            self.log_debug(f"Error updating position: {e}")
     
     def save_current_detection(self, mode: str):
         if not self.is_frozen or self.frozen_frame is None:
