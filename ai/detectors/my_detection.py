@@ -1285,7 +1285,7 @@ class CameraWorker:
         self.CAMERA_HEIGHT = 1.500
         self.CAMERA_FOV_H = 60.0
         self.CAMERA_FOV_V = 45.0
-        self.DETECTED_SQUARE_SIZE = 0.100
+        self.DETECTED_SQUARE_SIZE = 0.200
         
         # RUST DETECTION PARAMETERS
         self.RUST_WARP_SIZE = 300
@@ -1293,7 +1293,7 @@ class CameraWorker:
         self.rust_class_colors = {1: (0, 255, 0), 2: (0, 255, 255), 3: (0, 0, 255)}
         
         self.RUST_CAMERA_FOCAL_LENGTH = 800
-        self.RUST_REAL_SQUARE_SIZE = 0.10
+        self.RUST_REAL_SQUARE_SIZE = 0.20
         self.RUST_CAMERA_HEIGHT = 1.5
         
         self.rust_results_data = []
