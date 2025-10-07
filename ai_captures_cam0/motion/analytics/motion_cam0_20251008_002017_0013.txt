@@ -1,0 +1,27 @@
+DOT-ON-PLATE TRACKING ANALYSIS
+==================================================
+Camera: 0
+Timestamp: 2025-10-08 00:20:17
+Detection ID: 0014
+
+POSITION ANALYSIS (in METERS from ground level 0,0):
+X - Distance from Camera: 4.167 m
+Y - Horizontal Distance: 6.608 m (Right)
+Z - Height from Ground: -2.575 m
+Camera Height: 1.500 m (above ground)
+Detected Plate Diameter: 0.200 m
+Horizontal Angle: 57.8°
+Vertical Angle: -44.4°
+
+ROTATION ANALYSIS:
+Current Angle: 0.0°
+Total Rotation: -157.1°
+Rotation Speed: 0.0 m/s
+Direction: Stable
+
+DETECTION DETAILS:
+Plate Center (pixels): (1113, 729)
+Plate Radius (pixels): 12
+Marker Center (pixels): (1113, 729)
+Frame Size: 640 x 480
+Camera Focal Length (est.): 500 pixels

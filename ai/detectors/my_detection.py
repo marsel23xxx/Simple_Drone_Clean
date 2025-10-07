@@ -1207,6 +1207,7 @@ class CameraWorker:
         self.output_base = f"{output_base}_cam{camera_id}"
         self.device = gpu_manager.device
         self.drone_parser = DroneParser()
+        self.drone_parser.start()
         
         # LANDOLT PARAMETERS
         self.dp = 1.0
@@ -2828,12 +2829,14 @@ class CameraWorker:
         drone_x, drone_y, drone_z, drone_yaw = None, None, None, None
         try:
             # Gunakan get_latest() method yang benar
-            latest_record = self.drone_parser.get_latest()
+            record = self.drone_parser.get_latest()
+            self.drone_parser.save_data()  # Pastikan data disimpan
+            self.drone_parser.stop()
             
-            if latest_record:
+            if record:
                 # Ambil position dan rpy dari record
-                pos = self.drone_parser.get_position(latest_record)
-                rpy = self.drone_parser.get_rpy(latest_record)
+                pos = self.drone_parser.get_position()
+                rpy = self.drone_parser.get_rpy()
                 
                 if pos:
                     drone_x = pos['x']

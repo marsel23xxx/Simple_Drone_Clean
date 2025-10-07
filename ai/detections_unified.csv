@@ -5,3 +5,7 @@ timestamp,camera_id,detection_type,color,position,data
 20251006_154052,cam2,qr,blue,"(None, None, None)",Unknown QR
 20251006_155920,cam0,qr,blue,"(None, None, None)",Unknown QR
 20251006_160228,cam0,qr,blue,"(None, None, None)",Unknown QR
+20251008_002210,cam0,hazmat,red,"(None, None, None)",Unknown Hazmat
+20251008_004040,cam0,hazmat,red,"(None, None, None)",Unknown Hazmat
+20251008_004249,cam0,hazmat,red,"(None, None, None)",Unknown Hazmat
+20251008_004848,cam0,hazmat,red,"(-0.18, -0.06, -0.06)",Unknown Hazmat
