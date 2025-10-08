@@ -69,6 +69,7 @@ FILE_PATHS = {
 # Asset paths
 ASSET_PATHS = {
     'logo': UI_ASSETS / 'Bayu_sakti.png',
+    'logo_sari': UI_ASSETS / 'LOGO R BG-01.png',
     'drone_display': UI_ASSETS / 'drone-display.png',
     'compass': UI_ASSETS / 'compas.png',
     'emergency': UI_ASSETS / 'emergency.png',

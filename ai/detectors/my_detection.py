@@ -1345,6 +1345,13 @@ class CameraWorker:
         self.current_motion_data = None
         self.crack_results_data = []
         
+        self.hazmat_counter = 0
+        self.qr_counter = 0
+        self.landolt_counter = 0
+        self.crack_counter = 0
+        self.rust_counter = 0
+        self.motion_counter = 0
+        
         # Freeze state
         self.is_frozen = False
         self.frozen_frame = None
@@ -2868,7 +2875,17 @@ class CameraWorker:
         if mode == 'qr':
             filename = f"{base_path}/qr/images/qr_cam{self.camera_id}_{timestamp}.jpg"
             cv2.imwrite(filename, self.frozen_frame)
-            data_field = getattr(self, "current_qr_data", "Unknown QR")
+                
+            # Increment counter
+            self.qr_counter += 1
+                
+            # Extract QR data
+            if self.current_qr_detections and len(self.current_qr_detections) > 0:
+                qr_data = self.current_qr_detections[0]['qr_data']
+                data_field = f"QRCode {self.qr_counter}: {qr_data}"
+            else:
+                data_field = f"QRCode {self.qr_counter}: Unknown QR"
+                
             print(f"[CAM {self.camera_id}] Saved QR: {filename}")
 
         elif mode == 'crack' and self.current_crack_analysis:
@@ -2876,31 +2893,101 @@ class CameraWorker:
             os.makedirs(capture_folder, exist_ok=True)
             image_path = f"{capture_folder}/crack_original_{timestamp}.jpg"
             cv2.imwrite(image_path, self.current_crack_analysis['original_frame'])
-            data_field = f"{self.current_crack_analysis.get('crack_length', 'Unknown')} cm"
+            
+            # Increment counter
+            self.crack_counter += 1
+            
+            # Extract crack length
+            if self.crack_results_data and len(self.crack_results_data) > 0:
+                crack = self.crack_results_data[0]
+                length_m = crack.length
+                classification = crack.classification
+                data_field = f"Crack {self.crack_counter}: {length_m:.4f}m ({classification})"
+            else:
+                data_field = f"Crack {self.crack_counter}: Unknown length"
+            
             print(f"[CAM {self.camera_id}] Saved Crack: {capture_folder}")
 
         elif mode == 'rust':
             filename = f"{base_path}/rust/images/rust_cam{self.camera_id}_{timestamp}.jpg"
             cv2.imwrite(filename, self.frozen_frame)
-            data_field = getattr(self, "current_rust_degree", "Unknown Rust")
+            
+            # Increment counter
+            self.rust_counter += 1
+            
+            # Extract rust severity
+            if self.rust_results_data and len(self.rust_results_data) > 0:
+                corrosion = self.rust_results_data[0]
+                dominant = corrosion.dominant_class
+                percentage = corrosion.total_affected_percentage
+                data_field = f"Rust {self.rust_counter}: {dominant} ({percentage:.1f}%)"
+            else:
+                data_field = f"Rust {self.rust_counter}: Unknown degree"
+            
             print(f"[CAM {self.camera_id}] Saved Rust: {filename}")
 
         elif mode == 'hazmat':
             filename = f"{base_path}/hazmat/images/hazmat_cam{self.camera_id}_{timestamp}.jpg"
             cv2.imwrite(filename, self.frozen_frame)
-            data_field = getattr(self, "current_hazmat_type", "Unknown Hazmat")
+            
+            # Increment counter
+            self.hazmat_counter += 1
+            
+            # Extract hazmat type
+            if self.current_hazmat_results and self.current_hazmat_results.boxes is not None:
+                boxes = [box for box in self.current_hazmat_results.boxes 
+                         if float(box.conf[0]) >= self.HAZMAT_CONFIDENCE_THRESHOLD]
+                if boxes:
+                    box = boxes[0]
+                    cls_id = int(box.cls[0])
+                    class_name = self.current_hazmat_results.names.get(cls_id, str(cls_id))
+                    hazard_label = self.hazard_classes.get(class_name, f"Unclassified: {class_name}")
+                    data_field = f"Hazmat {self.hazmat_counter}: {hazard_label}"
+                else:
+                    data_field = f"Hazmat {self.hazmat_counter}: Unknown type"
+            else:
+                data_field = f"Hazmat {self.hazmat_counter}: Unknown type"
+            
             print(f"[CAM {self.camera_id}] Saved Hazmat: {filename}")
 
         elif mode == 'motion':
             filename = f"{base_path}/motion/images/motion_cam{self.camera_id}_{timestamp}.jpg"
             cv2.imwrite(filename, self.frozen_frame)
-            data_field = getattr(self, "current_motion_dir", "Unknown")
+            
+            # Increment counter
+            self.motion_counter += 1
+            
+            # Extract motion data
+            if self.current_motion_data:
+                total_rotation = self.current_motion_data.get('total_rotation', 0)
+                direction = self.current_motion_data.get('direction', 'Unknown')
+                rotation_deg = math.degrees(total_rotation)
+                data_field = f"Motion {self.motion_counter}: {rotation_deg:.1f}° ({direction})"
+            else:
+                data_field = f"Motion {self.motion_counter}: Unknown rotation"
+            
             print(f"[CAM {self.camera_id}] Saved Motion: {filename}")
 
         elif mode == 'landolt':
             filename = f"{base_path}/landolt/images/landolt_cam{self.camera_id}_{timestamp}.jpg"
             cv2.imwrite(filename, self.frozen_frame)
-            data_field = getattr(self, "current_landolt_type", "Unknown")
+            
+            # Increment counter
+            self.landolt_counter += 1
+            
+            # Extract ID from current_landolt_results
+            if self.current_landolt_results and len(self.current_landolt_results) > 0:
+                best_result = max(self.current_landolt_results, key=lambda x: x['ring_confidence'])
+                id_text = best_result.get('id_text', None)
+                id_conf = best_result.get('id_confidence', 0)
+                
+                if id_text:
+                    data_field = f"Landolt {self.landolt_counter}: ID {id_text} (Conf: {id_conf:.2f})"
+                else:
+                    data_field = f"Landolt {self.landolt_counter}: No ID detected"
+            else:
+                data_field = f"Landolt {self.landolt_counter}: Unknown"
+            
             print(f"[CAM {self.camera_id}] Saved Landolt: {filename}")
 
         else:

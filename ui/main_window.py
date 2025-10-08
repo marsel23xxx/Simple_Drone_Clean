@@ -294,7 +294,7 @@ class DroneControlMainWindow(QMainWindow):
             (self.ui.label_62, 'compass'),
             (self.ui.label_60, 'compass'),
             (self.ui.label_61, 'compass'),
-            (self.ui.label, 'logo'),
+            (self.ui.label, 'logo_sari'),
             (self.ui.label_2, 'drone_display'),
             (self.ui.label_9, 'logo'),
             (self.ui.btAutonomousEmergency, 'emergency'),
