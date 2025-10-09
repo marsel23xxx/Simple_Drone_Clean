@@ -57,3 +57,9 @@ timestamp,camera_id,detection_type,color,position,data
 20251009_222744,cam0,hazmat,red,"(None, None, None)",Hazmat 3: Class 2 - Flammable Gas
 20251009_222749,cam0,hazmat,red,"(None, None, None)",Hazmat 4: Class 2 - Flammable Gas
 20251009_222803,cam0,hazmat,red,"(None, None, None)",Hazmat 5: Class 1 - Explosive
+20251009_231600,cam0,qr,blue,"(None, None, None)",QRCode 1: https://www.curiousport.com
+20251009_232801,cam0,standby,gray,"(None, None, None)",Standby snapshot,LIVE
+20251009_232809,cam0,standby,gray,"(None, None, None)",Standby snapshot,LIVE
+20251009_232815,cam0,qr,blue,"(None, None, None)",QRCode 1: No detection (snapshot),LIVE
+20251009_232844,cam0,qr,blue,"(None, None, None)",QRCode 2: https://www.curiousport.com,FROZEN
+20251009_232949,cam0,qr,blue,"(None, None, None)",QRCode 3: No detection (snapshot),LIVE
