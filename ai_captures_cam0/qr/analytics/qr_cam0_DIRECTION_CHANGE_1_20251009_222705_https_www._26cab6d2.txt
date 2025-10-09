@@ -1,0 +1,26 @@
+=== QR CODE DETECTION ANALYSIS ===
+Camera: 0
+Timestamp: 2025-10-09 22:27:05
+Event Type: DIRECTION_CHANGE
+Save Counter: 1
+QR Hash: 26cab6d2
+============================================================
+
+QR DATA:
+https://www.curiousport.com
+
+3D POSITION ANALYSIS:
+X - Distance from Camera: 0.172m
+Y - Horizontal Position: -0.025m (LEFT)
+Z - Height from Ground: 1.025m
+Camera Height: 1.000m
+
+ANGLES:
+Horizontal Angle (Y): -8.2°
+Vertical Angle (X): -8.1°
+Direction: LEFT
+
+DETECTION DETAILS:
+QR Size (pixels): 233.2px
+Center Position: (232, 327)px
+

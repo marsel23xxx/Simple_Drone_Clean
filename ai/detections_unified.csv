@@ -29,3 +29,31 @@ timestamp,camera_id,detection_type,color,position,data
 20251008_230232,cam0,crack,orange,"(0.13, -0.01, -0.05)",Crack 1: 0.2547m (Wide/Severe)
 20251008_230646,cam0,crack,orange,"(0.13, -0.01, -0.05)",Crack 1: 0.2516m (Wide/Severe)
 20251008_232350,cam0,rust,brown,"(0.13, -0.01, -0.05)",Rust 1: Fair (19.5%)
+20251009_171924,cam0,qr,blue,"(None, None, None)",QRCode 1: http://en.m.wikipedia.org
+20251009_172132,cam0,qr,blue,"(None, None, None)",QRCode 2: https://www.curiousport.com
+20251009_173413,cam0,qr,blue,"(None, None, None)",QRCode 1: https://www.curiousport.com
+20251009_173519,cam0,hazmat,red,"(None, None, None)",Hazmat 1: Class 2 - Oxygen
+20251009_173525,cam0,hazmat,red,"(None, None, None)",Hazmat 2: Class 4 - Flammable Solid
+20251009_173532,cam0,hazmat,red,"(None, None, None)",Hazmat 3: Class 4 - Flammable Solid
+20251009_173606,cam0,landolt,yellow,"(None, None, None)",Landolt 1: No ID detected
+20251009_173613,cam0,landolt,yellow,"(None, None, None)",Landolt 2: No ID detected
+20251009_173618,cam0,landolt,yellow,"(None, None, None)",Landolt 3: No ID detected
+20251009_173640,cam0,landolt,yellow,"(None, None, None)",Landolt 4: No ID detected
+20251009_173656,cam0,hazmat,red,"(None, None, None)",Hazmat 4: Class 7 - Radioactive
+20251009_173936,cam0,qr,blue,"(None, None, None)",QRCode 1: https://www.curiousport.com
+20251009_173947,cam0,hazmat,red,"(None, None, None)",Hazmat 1: Class 2 - Flammable Gas
+20251009_173952,cam0,hazmat,red,"(None, None, None)",Hazmat 2: Class 4 - Flammable Solid
+20251009_173958,cam0,hazmat,red,"(None, None, None)",Hazmat 3: Class 2 - Inhalation Hazard
+20251009_174008,cam0,landolt,yellow,"(None, None, None)",Landolt 1: No ID detected
+20251009_174013,cam0,landolt,yellow,"(None, None, None)",Landolt 2: No ID detected
+20251009_174020,cam0,landolt,yellow,"(None, None, None)",Landolt 3: No ID detected
+20251009_174032,cam0,landolt,yellow,"(None, None, None)",Landolt 4: No ID detected
+20251009_222630,cam0,qr,blue,"(None, None, None)",QRCode 1: https://www.curiousport.com
+20251009_222707,cam0,qr,blue,"(None, None, None)",QRCode 2: https://www.curiousport.com
+20251009_222716,cam0,landolt,yellow,"(None, None, None)",Landolt 1: No ID detected
+20251009_222727,cam0,landolt,yellow,"(None, None, None)",Landolt 2: No ID detected
+20251009_222737,cam0,hazmat,red,"(None, None, None)",Hazmat 1: Class 4 - Flammable Solid
+20251009_222741,cam0,hazmat,red,"(None, None, None)",Hazmat 2: Class 1 - Explosive
+20251009_222744,cam0,hazmat,red,"(None, None, None)",Hazmat 3: Class 2 - Flammable Gas
+20251009_222749,cam0,hazmat,red,"(None, None, None)",Hazmat 4: Class 2 - Flammable Gas
+20251009_222803,cam0,hazmat,red,"(None, None, None)",Hazmat 5: Class 1 - Explosive

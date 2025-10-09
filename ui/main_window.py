@@ -17,22 +17,22 @@ from PyQt5.QtWidgets import (QMainWindow, QApplication, QLabel, QTableWidgetItem
 from PyQt5.QtCore import QTimer, Qt
 
 # Import UI
-from activity_ui import Ui_MainWindow
+from my_camera_stream import Ui_MainWindow
 
 # Import settings
 from config.settings import (APP_CONFIG, UI_CONFIG, ASSET_PATHS, 
                             NETWORK_CONFIG, FILE_PATHS)
 
 # Import widgets
-from .widgets.point_cloud_widget import SmoothPointCloudWidget
+# from .widgets.point_cloud_widget import SmoothPointCloudWidget
 from .widgets.video_stream_widget import RTSPStreamWidget, VideoStreamWidget
-from .widgets.joystick_dialog import JoystickDialog
+# from .widgets.joystick_dialog import JoystickDialog
 
 # Import core components
-from core.tcp_receiver import TCPDataReceiver, TCPServerThread
-from core.websocket_client import WebSocketCommandClient, WebSocketCommandThread
-from core.drone_parser import DroneParser
-from .widgets.drone_telemetry_handler import DroneTelemetryHandler
+# from core.tcp_receiver import TCPDataReceiver, TCPServerThread
+# from core.websocket_client import WebSocketCommandClient, WebSocketCommandThread
+# from core.drone_parser import DroneParser
+# from .widgets.drone_telemetry_handler import DroneTelemetryHandler
 
 # Import AI system
 from ai.detectors.my_detection import MultiCameraController
@@ -57,7 +57,7 @@ class DroneControlMainWindow(QMainWindow):
         self.setup_functional_widgets()
         self.connect_signals()
         self.setup_timers()
-        self.update_asset_paths()
+        # self.update_asset_paths()
         
         # Start services
         self.start_services()
@@ -154,12 +154,12 @@ class DroneControlMainWindow(QMainWindow):
     def setup_communication(self):
         """Initialize communication components"""
         # TCP server for point cloud
-        self.tcp_receiver = TCPDataReceiver()
-        self.tcp_thread = None
+        # self.tcp_receiver = TCPDataReceiver()
+        # self.tcp_thread = None
         
-        # WebSocket client for commands
-        self.websocket_client = WebSocketCommandClient()
-        self.websocket_thread = None
+        # # WebSocket client for commands
+        # self.websocket_client = WebSocketCommandClient()
+        # self.websocket_thread = None
         
         # UDP telemetry
         self.drone_parser = None
@@ -168,107 +168,109 @@ class DroneControlMainWindow(QMainWindow):
         self._init_drone_parser()
     
     def _init_drone_parser(self):
-        """Initialize drone parser for UDP telemetry"""
-        try:
-            drone_port = 8889
+        # """Initialize drone parser for UDP telemetry"""
+        # try:
+        #     drone_port = 8889
             
-            try:
-                self.drone_parser = DroneParser(port=drone_port, max_records=1000)
-            except TypeError:
-                self.drone_parser = DroneParser(port=drone_port)
+        #     try:
+        #         self.drone_parser = DroneParser(port=drone_port, max_records=1000)
+        #     except TypeError:
+        #         self.drone_parser = DroneParser(port=drone_port)
             
-            self.telemetry_handler = DroneTelemetryHandler(self, self.drone_parser)
-            self.drone_parser.start(callback=self.telemetry_handler.on_udp_packet_received)
+        #     self.telemetry_handler = DroneTelemetryHandler(self, self.drone_parser)
+        #     self.drone_parser.start(callback=self.telemetry_handler.on_udp_packet_received)
             
-            print(f"✅ DroneParser started on port {drone_port}")
+        #     print(f"✅ DroneParser started on port {drone_port}")
             
-        except Exception as e:
-            print(f"⚠️ DroneParser initialization failed: {e}")
-            self.drone_parser = None
+        # except Exception as e:
+        #     print(f"⚠️ DroneParser initialization failed: {e}")
+        #     self.drone_parser = None
+        pass
     
     def setup_functional_widgets(self):
-        """Setup functional widgets"""
-        # Point cloud widget
-        self.main_point_cloud = SmoothPointCloudWidget()
-        self.main_point_cloud.setParent(self.ui.centralwidget)
-        self.main_point_cloud.setGeometry(self.ui.SwitchView_1.geometry())
-        self.main_point_cloud.setStyleSheet(self.ui.SwitchView_1.styleSheet())
-        self.ui.SwitchView_1.hide()
+    #     """Setup functional widgets"""
+    #     # Point cloud widget
+    #     self.main_point_cloud = SmoothPointCloudWidget()
+    #     self.main_point_cloud.setParent(self.ui.centralwidget)
+    #     self.main_point_cloud.setGeometry(self.ui.SwitchView_1.geometry())
+    #     self.main_point_cloud.setStyleSheet(self.ui.SwitchView_1.styleSheet())
+    #     self.ui.SwitchView_1.hide()
         
         # Main video stream (Camera 0)
         self.video_stream = RTSPStreamWidget()
-        self.video_stream.setParent(self.ui.frame_8)
-        self.video_stream.setGeometry(self.ui.SwitchView_2.geometry())
-        self.video_stream.setStyleSheet(self.ui.SwitchView_2.styleSheet())
-        self.ui.SwitchView_2.hide()
+        # self.video_stream.setParent(self.ui.frame_8)  
+        self.video_stream.setParent(self.ui.centralwidget)
+        self.video_stream.setGeometry(self.ui.camStream.geometry())
+        self.video_stream.setStyleSheet(self.ui.camStream.styleSheet())
+        self.ui.camStream.show()
         
-        # Camera 1 widget (Bottom)
-        if hasattr(self.ui, 'imgDetector'):
-            self.camera1_widget = VideoStreamWidget()
-            self.camera1_widget.setParent(self.ui.imgDetector.parent())
-            self.camera1_widget.setGeometry(self.ui.imgDetector.geometry())
-            self.camera1_widget.setStyleSheet(self.ui.imgDetector.styleSheet())
-            self.ui.imgDetector.hide()
+    #     # Camera 1 widget (Bottom)
+    #     if hasattr(self.ui, 'imgDetector'):
+    #         self.camera1_widget = VideoStreamWidget()
+    #         self.camera1_widget.setParent(self.ui.imgDetector.parent())
+    #         self.camera1_widget.setGeometry(self.ui.imgDetector.geometry())
+    #         self.camera1_widget.setStyleSheet(self.ui.imgDetector.styleSheet())
+    #         self.ui.imgDetector.hide()
         
-        # Camera 2 widget (Top)
-        if hasattr(self.ui, 'imgCapture'):
-            self.camera2_widget = VideoStreamWidget()
-            self.camera2_widget.setParent(self.ui.imgCapture.parent())
-            self.camera2_widget.setGeometry(self.ui.imgCapture.geometry())
-            self.camera2_widget.setStyleSheet(self.ui.imgCapture.styleSheet())
-            self.ui.imgCapture.hide()
+    #     # Camera 2 widget (Top)
+    #     if hasattr(self.ui, 'imgCapture'):
+    #         self.camera2_widget = VideoStreamWidget()
+    #         self.camera2_widget.setParent(self.ui.imgCapture.parent())
+    #         self.camera2_widget.setGeometry(self.ui.imgCapture.geometry())
+    #         self.camera2_widget.setStyleSheet(self.ui.imgCapture.styleSheet())
+    #         self.ui.imgCapture.hide()
         
-        # Initial visibility
-        self.main_point_cloud.show()
-        self.video_stream.hide()
+    #     # Initial visibility
+    #     self.main_point_cloud.show()
+        self.video_stream.show()
     
     def connect_signals(self):
         """Connect all signals"""
         # TCP signals
-        self.tcp_receiver.frame_received.connect(self.display_frame)
-        self.tcp_receiver.connection_status.connect(self.update_tcp_status)
+        # self.tcp_receiver.frame_received.connect(self.display_frame)
+        # self.tcp_receiver.connection_status.connect(self.update_tcp_status)
         
         # WebSocket signals
-        self.websocket_client.connection_status.connect(self.update_websocket_status)
+        # self.websocket_client.connection_status.connect(self.update_websocket_status)
         
         # Point cloud signals
-        self.main_point_cloud.waypoint_added.connect(self.update_waypoints_table)
-        self.main_point_cloud.waypoint_changed.connect(self.update_waypoints_table)
-        self.main_point_cloud.marker_changed.connect(self.update_marker_display)
+        # self.main_point_cloud.waypoint_added.connect(self.update_waypoints_table)
+        # self.main_point_cloud.waypoint_changed.connect(self.update_waypoints_table)
+        # self.main_point_cloud.marker_changed.connect(self.update_marker_display)
         
         # Video stream signals
         self.video_stream.frame_received.connect(self.update_video_status)
         
         # UI buttons
-        self.ui.CommandConnect.clicked.connect(self.toggle_connection)
-        self.ui.btAutonomousEmergency.clicked.connect(self.emergency_stop)
-        self.ui.DroneSwitch.clicked.connect(self.switch_views)
+        # self.ui.CommandConnect.clicked.connect(self.toggle_connection)
+        # self.ui.btAutonomousEmergency.clicked.connect(self.emergency_stop)
+        # self.ui.DroneSwitch.clicked.connect(self.switch_views)
         
-        if hasattr(self.ui, 'btVideoStream'):
-            self.ui.btVideoStream.clicked.connect(self.toggle_video_stream)
+        # if hasattr(self.ui, 'btVideoStream'):
+        #     self.ui.btVideoStream.clicked.connect(self.toggle_video_stream)
         if hasattr(self.ui, 'DroneRefreshVideo'):
             self.ui.DroneRefreshVideo.clicked.connect(self.refresh_video_streams)
         
         # Single Command controls
-        self.ui.scHover.clicked.connect(lambda: self.send_websocket_command("hover"))
-        self.ui.scSendGoto.clicked.connect(self.send_goto_command)
-        self.ui.scEdit.clicked.connect(self.edit_marker_orientation)
-        self.ui.scClearMarker.clicked.connect(self.clear_marker)
-        self.ui.scYawEnable.stateChanged.connect(self.update_marker_yaw)
-        self.ui.scLanding.stateChanged.connect(self.update_marker_landing)
+        # self.ui.scHover.clicked.connect(lambda: self.send_websocket_command("hover"))
+        # self.ui.scSendGoto.clicked.connect(self.send_goto_command)
+        # self.ui.scEdit.clicked.connect(self.edit_marker_orientation)
+        # self.ui.scClearMarker.clicked.connect(self.clear_marker)
+        # self.ui.scYawEnable.stateChanged.connect(self.update_marker_yaw)
+        # self.ui.scLanding.stateChanged.connect(self.update_marker_landing)
         
         # Multiple Command controls
-        self.ui.mcEditMode.stateChanged.connect(self.toggle_edit_mode)
-        self.ui.mcViewControls.stateChanged.connect(self.update_view_controls)
-        self.ui.mcHeightFiltering.valueChanged.connect(self.update_height_filter)
-        self.ui.mcHover.clicked.connect(lambda: self.send_websocket_command("hover"))
-        self.ui.mcHome.clicked.connect(lambda: self.send_websocket_command("home"))
-        self.ui.mcSaveMaps.clicked.connect(self.save_current_frame)
-        self.ui.mcSendCommand.clicked.connect(self.send_multiple_commands)
-        self.ui.mcDialOrientation.valueChanged.connect(self.on_orientation_dial_changed)
+        # self.ui.mcEditMode.stateChanged.connect(self.toggle_edit_mode)
+        # self.ui.mcViewControls.stateChanged.connect(self.update_view_controls)
+        # self.ui.mcHeightFiltering.valueChanged.connect(self.update_height_filter)
+        # self.ui.mcHover.clicked.connect(lambda: self.send_websocket_command("hover"))
+        # self.ui.mcHome.clicked.connect(lambda: self.send_websocket_command("home"))
+        # self.ui.mcSaveMaps.clicked.connect(self.save_current_frame)
+        # self.ui.mcSendCommand.clicked.connect(self.send_multiple_commands)
+        # self.ui.mcDialOrientation.valueChanged.connect(self.on_orientation_dial_changed)
         
         # Altitude slider
-        self.ui.DroneAltitude.valueChanged.connect(self.update_altitude_display)
+        # self.ui.DroneAltitude.valueChanged.connect(self.update_altitude_display)
     
     def setup_timers(self):
         """Setup update timers"""
@@ -287,33 +289,33 @@ class DroneControlMainWindow(QMainWindow):
         self.fps_timer.timeout.connect(self.update_fps_display)
         self.fps_timer.start(2000)
     
-    def update_asset_paths(self):
-        """Update asset paths for styling"""
-        import re
+    # def update_asset_paths(self):
+    #     """Update asset paths for styling"""
+    #     import re
         
-        widgets_with_assets = [
-            (self.ui.label_62, 'compass'),
-            (self.ui.label_60, 'compass'),
-            (self.ui.label_61, 'compass'),
-            (self.ui.label, 'logo_sari'),
-            (self.ui.label_2, 'drone_display'),
-            (self.ui.label_9, 'logo'),
-            (self.ui.btAutonomousEmergency, 'emergency'),
-            (self.ui.DroneAltitude, 'altitude'),
-            (self.ui.DroneHeight, 'height')
-        ]
+    #     widgets_with_assets = [
+    #         (self.ui.label_62, 'compass'),
+    #         (self.ui.label_60, 'compass'),
+    #         (self.ui.label_61, 'compass'),
+    #         (self.ui.label, 'logo_sari'),
+    #         (self.ui.label_2, 'drone_display'),
+    #         (self.ui.label_9, 'logo'),
+    #         (self.ui.btAutonomousEmergency, 'emergency'),
+    #         (self.ui.DroneAltitude, 'altitude'),
+    #         (self.ui.DroneHeight, 'height')
+    #     ]
         
-        for widget, asset_key in widgets_with_assets:
-            if asset_key in ASSET_PATHS and ASSET_PATHS[asset_key].exists():
-                current_style = widget.styleSheet()
-                asset_path = str(ASSET_PATHS[asset_key]).replace('\\', '/')
-                if 'image: url(' in current_style:
-                    new_style = re.sub(
-                        r'image: url\(["\']?[^"\']*["\']?\);',
-                        f'image: url("{asset_path}");',
-                        current_style
-                    )
-                    widget.setStyleSheet(new_style)
+    #     for widget, asset_key in widgets_with_assets:
+    #         if asset_key in ASSET_PATHS and ASSET_PATHS[asset_key].exists():
+    #             current_style = widget.styleSheet()
+    #             asset_path = str(ASSET_PATHS[asset_key]).replace('\\', '/')
+    #             if 'image: url(' in current_style:
+    #                 new_style = re.sub(
+    #                     r'image: url\(["\']?[^"\']*["\']?\);',
+    #                     f'image: url("{asset_path}");',
+    #                     current_style
+    #                 )
+    #                 widget.setStyleSheet(new_style)
     
     # ========================================
     # SERVICE MANAGEMENT
@@ -321,21 +323,22 @@ class DroneControlMainWindow(QMainWindow):
     
     def start_services(self):
         """Start all communication services"""
-        self.start_tcp_server()
+        # self.start_tcp_server()
         self.start_video_stream()
     
-    def start_tcp_server(self):
-        """Start TCP server thread"""
-        if self.tcp_thread is None or not self.tcp_thread.isRunning():
-            self.tcp_thread = TCPServerThread(self.tcp_receiver)
-            self.tcp_thread.start()
+    # def start_tcp_server(self):
+    #     """Start TCP server thread"""
+    #     if self.tcp_thread is None or not self.tcp_thread.isRunning():
+    #         self.tcp_thread = TCPServerThread(self.tcp_receiver)
+    #         self.tcp_thread.start()
     
     def start_video_stream(self, stream_url=None, cam1_url=None, cam2_url=None,
                           width_scale=0.5, height_scale=0.5):
         """Start independent multi-camera streams"""
         # Default URLs
         if not stream_url:
-            stream_url = "rtsp://192.168.1.99:1234"
+            # stream_url = "rtsp://192.168.1.99:1234"
+            stream_url = "rtmp://127.0.0.1:1935/live/neo"
         if not cam1_url:
             cam1_url = "rtsp://192.168.1.88:8555/bottom"
         if not cam2_url:
@@ -460,13 +463,13 @@ class DroneControlMainWindow(QMainWindow):
         """Store Camera 0 frame"""
         self.cam0_latest_frame = frame.copy()
     
-    def on_cam1_frame(self, frame):
-        """Store Camera 1 frame"""
-        self.cam1_latest_frame = frame.copy()
+    # def on_cam1_frame(self, frame):
+    #     """Store Camera 1 frame"""
+    #     self.cam1_latest_frame = frame.copy()
     
-    def on_cam2_frame(self, frame):
-        """Store Camera 2 frame"""
-        self.cam2_latest_frame = frame.copy()
+    # def on_cam2_frame(self, frame):
+    #     """Store Camera 2 frame"""
+    #     self.cam2_latest_frame = frame.copy()
     
     def process_ai_frames(self):
         """Process frames with AI - gracefully handles missing cameras"""
@@ -506,17 +509,17 @@ class DroneControlMainWindow(QMainWindow):
                     except:
                         pass
                 
-                if self.cam1_latest_frame is not None and hasattr(self, 'camera1_widget'):
-                    try:
-                        self.camera1_widget.update_frame(processed_frames[1])
-                    except:
-                        pass
+                # if self.cam1_latest_frame is not None and hasattr(self, 'camera1_widget'):
+                #     try:
+                #         self.camera1_widget.update_frame(processed_frames[1])
+                #     except:
+                #         pass
                 
-                if self.cam2_latest_frame is not None and hasattr(self, 'camera2_widget'):
-                    try:
-                        self.camera2_widget.update_frame(processed_frames[2])
-                    except:
-                        pass
+                # if self.cam2_latest_frame is not None and hasattr(self, 'camera2_widget'):
+                #     try:
+                #         self.camera2_widget.update_frame(processed_frames[2])
+                #     except:
+                #         pass
         
         except Exception as e:
             # Log occasionally to avoid spam
@@ -657,44 +660,44 @@ class DroneControlMainWindow(QMainWindow):
     # WEBSOCKET COMMANDS
     # ========================================
     
-    def toggle_connection(self):
-        """Toggle WebSocket connection"""
-        if self.websocket_client.connected:
-            self.disconnect_websocket()
-        else:
-            self.connect_websocket()
+    # def toggle_connection(self):
+    #     """Toggle WebSocket connection"""
+    #     if self.websocket_client.connected:
+    #         self.disconnect_websocket()
+    #     else:
+    #         self.connect_websocket()
     
-    def connect_websocket(self):
-        """Connect to WebSocket server"""
-        if self.websocket_thread is None or not self.websocket_thread.isRunning():
-            self.websocket_client.start_client()
-            self.websocket_thread = WebSocketCommandThread(self.websocket_client)
-            self.websocket_thread.start()
+    # def connect_websocket(self):
+    #     """Connect to WebSocket server"""
+    #     if self.websocket_thread is None or not self.websocket_thread.isRunning():
+    #         self.websocket_client.start_client()
+    #         self.websocket_thread = WebSocketCommandThread(self.websocket_client)
+    #         self.websocket_thread.start()
     
-    def disconnect_websocket(self):
-        """Disconnect from WebSocket server"""
-        self.websocket_client.stop_client()
-        if self.websocket_thread:
-            self.websocket_thread.quit()
-            self.websocket_thread.wait()
-            self.websocket_thread = None
+    # def disconnect_websocket(self):
+    #     """Disconnect from WebSocket server"""
+    #     self.websocket_client.stop_client()
+    #     if self.websocket_thread:
+    #         self.websocket_thread.quit()
+    #         self.websocket_thread.wait()
+    #         self.websocket_thread = None
     
-    def send_websocket_command(self, command):
-        """Send command through WebSocket"""
-        if self.websocket_thread and self.websocket_client.connected:
-            success = self.websocket_thread.send_command_sync(command)
-            if not success:
-                self.log_debug(f"Failed to send: {command}")
-            return success
-        else:
-            self.log_debug(f"Cannot send '{command}': Not connected")
-            return False
+    # def send_websocket_command(self, command):
+    #     """Send command through WebSocket"""
+    #     if self.websocket_thread and self.websocket_client.connected:
+    #         success = self.websocket_thread.send_command_sync(command)
+    #         if not success:
+    #             self.log_debug(f"Failed to send: {command}")
+    #         return success
+    #     else:
+    #         self.log_debug(f"Cannot send '{command}': Not connected")
+    #         return False
     
-    def emergency_stop(self):
-        """Emergency stop command"""
-        self.send_websocket_command("stop")
-        self.log_debug("🚨 EMERGENCY STOP ACTIVATED")
-        print("🚨 EMERGENCY STOP ACTIVATED")
+    # def emergency_stop(self):
+    #     """Emergency stop command"""
+    #     self.send_websocket_command("stop")
+    #     self.log_debug("🚨 EMERGENCY STOP ACTIVATED")
+    #     print("🚨 EMERGENCY STOP ACTIVATED")
     
     # ========================================
     # VIEW MANAGEMENT
@@ -703,56 +706,56 @@ class DroneControlMainWindow(QMainWindow):
     def switch_views(self):
         """Swap point cloud and video positions"""
         # Get current properties
-        pc_geometry = self.main_point_cloud.geometry()
-        pc_parent = self.main_point_cloud.parent()
-        pc_style = self.main_point_cloud.styleSheet()
+        # pc_geometry = self.main_point_cloud.geometry()
+        # pc_parent = self.main_point_cloud.parent()
+        # pc_style = self.main_point_cloud.styleSheet()
         
-        video_geometry = self.video_stream.geometry()
-        video_parent = self.video_stream.parent()
-        video_style = self.video_stream.styleSheet()
+        # video_geometry = self.video_stream.geometry()
+        # video_parent = self.video_stream.parent()
+        # video_style = self.video_stream.styleSheet()
         
         # Swap
-        self.main_point_cloud.setParent(video_parent)
-        self.main_point_cloud.setGeometry(video_geometry)
-        self.main_point_cloud.setStyleSheet(video_style)
+        # self.main_point_cloud.setParent(video_parent)
+        # self.main_point_cloud.setGeometry(video_geometry)
+        # self.main_point_cloud.setStyleSheet(video_style)
         
-        self.video_stream.setParent(pc_parent)
-        self.video_stream.setGeometry(pc_geometry)
-        self.video_stream.setStyleSheet(pc_style)
+        # self.video_stream.setParent(pc_parent)
+        # self.video_stream.setGeometry(pc_geometry)
+        # self.video_stream.setStyleSheet(pc_style)
         
         # Show both
-        self.main_point_cloud.show()
+        # self.main_point_cloud.show()
         self.video_stream.show()
         
         # Toggle mode
-        if self.current_view_mode == "pointcloud":
-            self.current_view_mode = "video"
-            self.ui.DroneSwitch.setText("Point Cloud Main")
-            self.ui.mcEditMode.setEnabled(False)
-            self.ui.scEdit.setEnabled(False)
-            self.ui.scSendGoto.setEnabled(False)
-            self.ui.scClearMarker.setEnabled(False)
-            self.log_debug("View: Video main, Point cloud secondary")
-        else:
-            self.current_view_mode = "pointcloud"
-            self.ui.DroneSwitch.setText("Video Main")
-            self.ui.mcEditMode.setEnabled(True)
-            self.update_marker_display()
-            self.log_debug("View: Point cloud main, Video secondary")
+        # if self.current_view_mode == "pointcloud":
+        #     self.current_view_mode = "video"
+        #     self.ui.DroneSwitch.setText("Point Cloud Main")
+        #     self.ui.mcEditMode.setEnabled(False)
+        #     self.ui.scEdit.setEnabled(False)
+        #     self.ui.scSendGoto.setEnabled(False)
+        #     self.ui.scClearMarker.setEnabled(False)
+        #     self.log_debug("View: Video main, Point cloud secondary")
+        # else:
+        #     self.current_view_mode = "pointcloud"
+        #     self.ui.DroneSwitch.setText("Video Main")
+        #     self.ui.mcEditMode.setEnabled(True)
+        #     self.update_marker_display()
+        #     self.log_debug("View: Point cloud main, Video secondary")
     
-    def display_frame(self, points):
-        """Display new point cloud frame"""
-        self.frame_count += 1
+    # def display_frame(self, points):
+    #     """Display new point cloud frame"""
+    #     self.frame_count += 1
         
-        # Calculate FPS
-        current_time = time.time()
-        time_diff = current_time - self.last_frame_time
-        if time_diff > 0:
-            self.fps = 0.9 * self.fps + 0.1 * (1.0 / time_diff)
-        self.last_frame_time = current_time
+    #     # Calculate FPS
+    #     current_time = time.time()
+    #     time_diff = current_time - self.last_frame_time
+    #     if time_diff > 0:
+    #         self.fps = 0.9 * self.fps + 0.1 * (1.0 / time_diff)
+    #     self.last_frame_time = current_time
         
-        # Update widget
-        self.main_point_cloud.update_current_frame(points)
+    #     # Update widget
+    #     self.main_point_cloud.update_current_frame(points)
     
     def update_video_status(self):
         """Update video stream status"""
@@ -762,344 +765,344 @@ class DroneControlMainWindow(QMainWindow):
     # STATUS UPDATES
     # ========================================
     
-    def update_tcp_status(self, connected, message):
-        """Update TCP connection status"""
-        color = "rgb(0, 255, 0)" if connected else "rgb(255, 0, 0)"
-        text = "Connected" if connected else "Disconnected"
+    # def update_tcp_status(self, connected, message):
+    #     """Update TCP connection status"""
+    #     color = "rgb(0, 255, 0)" if connected else "rgb(255, 0, 0)"
+    #     text = "Connected" if connected else "Disconnected"
         
-        self.ui.CommandOnline.setStyleSheet(f"""
-            background-color: {color};
-            border: 0px;
-            border-radius: 10px;
-        """)
-        self.ui.CommandStatus.setText(text)
-        self.ui.btQrcodeOnline_3.setStyleSheet(f"""
-            background-color: {color};
-            border: 0px;
-        """)
+    #     self.ui.CommandOnline.setStyleSheet(f"""
+    #         background-color: {color};
+    #         border: 0px;
+    #         border-radius: 10px;
+    #     """)
+    #     self.ui.CommandStatus.setText(text)
+    #     self.ui.btQrcodeOnline_3.setStyleSheet(f"""
+    #         background-color: {color};
+    #         border: 0px;
+    #     """)
     
-    def update_websocket_status(self, connected, message):
-        """Update WebSocket connection status"""
-        if connected:
-            self.ui.CommandConnect.setText("DISCONNECT")
-            self.ui.CommandMode.setText("Connected")
-        else:
-            self.ui.CommandConnect.setText("CONNECT")
-            self.ui.CommandMode.setText("Disconnected")
+    # def update_websocket_status(self, connected, message):
+    #     """Update WebSocket connection status"""
+    #     if connected:
+    #         self.ui.CommandConnect.setText("DISCONNECT")
+    #         self.ui.CommandMode.setText("Connected")
+    #     else:
+    #         self.ui.CommandConnect.setText("CONNECT")
+    #         self.ui.CommandMode.setText("Disconnected")
     
     # ========================================
     # WAYPOINT MANAGEMENT (abbreviated for clarity)
     # ========================================
     
-    def toggle_edit_mode(self, state):
-        """Toggle waypoint edit mode"""
-        if self.current_view_mode != "pointcloud":
-            self.ui.mcEditMode.setChecked(False)
-            return
+    # def toggle_edit_mode(self, state):
+    #     """Toggle waypoint edit mode"""
+    #     if self.current_view_mode != "pointcloud":
+    #         self.ui.mcEditMode.setChecked(False)
+    #         return
         
-        self.edit_mode = state == Qt.Checked
-        self.main_point_cloud.set_edit_mode(self.edit_mode)
-        self.log_debug(f"Edit mode: {'enabled' if self.edit_mode else 'disabled'}")
+    #     self.edit_mode = state == Qt.Checked
+    #     self.main_point_cloud.set_edit_mode(self.edit_mode)
+    #     self.log_debug(f"Edit mode: {'enabled' if self.edit_mode else 'disabled'}")
         
-        if self.edit_mode:
-            self.update_waypoints_table()
+    #     if self.edit_mode:
+    #         self.update_waypoints_table()
     
-    def update_view_controls(self, state):
-        """Update view controls"""
-        if self.current_view_mode == "pointcloud":
-            top_down = state == Qt.Checked
-            self.main_point_cloud.set_top_down_mode(top_down)
-            self.log_debug(f"Top-down: {'locked' if top_down else 'unlocked'}")
+    # def update_view_controls(self, state):
+    #     """Update view controls"""
+    #     if self.current_view_mode == "pointcloud":
+    #         top_down = state == Qt.Checked
+    #         self.main_point_cloud.set_top_down_mode(top_down)
+    #         self.log_debug(f"Top-down: {'locked' if top_down else 'unlocked'}")
     
-    def update_height_filter(self, value):
-        """Update height filtering"""
-        if self.current_view_mode == "pointcloud":
-            self.main_point_cloud.set_z_filter(max_z=value, enabled=True)
-            self.log_debug(f"Height filter: {value:.1f}m")
+    # def update_height_filter(self, value):
+    #     """Update height filtering"""
+    #     if self.current_view_mode == "pointcloud":
+    #         self.main_point_cloud.set_z_filter(max_z=value, enabled=True)
+    #         self.log_debug(f"Height filter: {value:.1f}m")
     
-    def update_waypoints_table(self):
-        """Update waypoints table"""
-        if self.current_view_mode != "pointcloud":
-            return
+    # def update_waypoints_table(self):
+    #     """Update waypoints table"""
+    #     if self.current_view_mode != "pointcloud":
+    #         return
         
-        waypoints = self.main_point_cloud.get_waypoints()
-        self.ui.mcDisplayData.setRowCount(len(waypoints))
+    #     waypoints = self.main_point_cloud.get_waypoints()
+    #     self.ui.mcDisplayData.setRowCount(len(waypoints))
         
-        for i, wp in enumerate(waypoints):
-            pos_x, pos_y = wp['position']
+    #     for i, wp in enumerate(waypoints):
+    #         pos_x, pos_y = wp['position']
             
-            # Position
-            self.ui.mcDisplayData.setItem(i, 0, 
-                QTableWidgetItem(f"({pos_x:.2f}, {pos_y:.2f})"))
+    #         # Position
+    #         self.ui.mcDisplayData.setItem(i, 0, 
+    #             QTableWidgetItem(f"({pos_x:.2f}, {pos_y:.2f})"))
             
-            # Orientation
-            self.ui.mcDisplayData.setItem(i, 1,
-                QTableWidgetItem(f"{wp['orientation']:.3f}"))
+    #         # Orientation
+    #         self.ui.mcDisplayData.setItem(i, 1,
+    #             QTableWidgetItem(f"{wp['orientation']:.3f}"))
             
-            # Edit button
-            edit_btn = QPushButton("Edit")
-            edit_btn.clicked.connect(lambda _, idx=i: self.edit_waypoint_orientation(idx))
-            self.ui.mcDisplayData.setCellWidget(i, 2, edit_btn)
+    #         # Edit button
+    #         edit_btn = QPushButton("Edit")
+    #         edit_btn.clicked.connect(lambda _, idx=i: self.edit_waypoint_orientation(idx))
+    #         self.ui.mcDisplayData.setCellWidget(i, 2, edit_btn)
             
-            # Yaw Enable
-            yaw_check = QCheckBox()
-            yaw_check.setChecked(wp['yaw_enable'])
-            yaw_check.stateChanged.connect(lambda s, idx=i: self.update_waypoint_yaw(idx, s))
-            self.ui.mcDisplayData.setCellWidget(i, 3, yaw_check)
+    #         # Yaw Enable
+    #         yaw_check = QCheckBox()
+    #         yaw_check.setChecked(wp['yaw_enable'])
+    #         yaw_check.stateChanged.connect(lambda s, idx=i: self.update_waypoint_yaw(idx, s))
+    #         self.ui.mcDisplayData.setCellWidget(i, 3, yaw_check)
             
-            # Landing
-            land_check = QCheckBox()
-            land_check.setChecked(wp['landing'])
-            land_check.stateChanged.connect(lambda s, idx=i: self.update_waypoint_landing(idx, s))
-            self.ui.mcDisplayData.setCellWidget(i, 4, land_check)
+    #         # Landing
+    #         land_check = QCheckBox()
+    #         land_check.setChecked(wp['landing'])
+    #         land_check.stateChanged.connect(lambda s, idx=i: self.update_waypoint_landing(idx, s))
+    #         self.ui.mcDisplayData.setCellWidget(i, 4, land_check)
             
-            # Action
-            if wp['added']:
-                action_btn = QPushButton("Delete")
-                action_btn.clicked.connect(lambda _, idx=i: self.delete_waypoint(idx))
-            else:
-                action_btn = QPushButton("Add")
-                action_btn.clicked.connect(lambda _, idx=i: self.add_waypoint(idx))
-            self.ui.mcDisplayData.setCellWidget(i, 5, action_btn)
+    #         # Action
+    #         if wp['added']:
+    #             action_btn = QPushButton("Delete")
+    #             action_btn.clicked.connect(lambda _, idx=i: self.delete_waypoint(idx))
+    #         else:
+    #             action_btn = QPushButton("Add")
+    #             action_btn.clicked.connect(lambda _, idx=i: self.add_waypoint(idx))
+    #         self.ui.mcDisplayData.setCellWidget(i, 5, action_btn)
     
-    def update_marker_display(self):
-        """Update marker display"""
-        if self.current_view_mode != "pointcloud":
-            self._clear_marker_display()
-            return
+    # def update_marker_display(self):
+    #     """Update marker display"""
+    #     if self.current_view_mode != "pointcloud":
+    #         self._clear_marker_display()
+    #         return
         
-        marker = self.main_point_cloud.get_marker()
+    #     marker = self.main_point_cloud.get_marker()
         
-        if marker:
-            x, y = marker['position']
-            self.ui.scPositionX.setText(f"{x:.2f}")
-            self.ui.scPositionY.setText(f"{y:.2f}")
-            self.ui.scOrientation.setText(f"{marker['orientation']:.4f} rad")
+    #     if marker:
+    #         x, y = marker['position']
+    #         self.ui.scPositionX.setText(f"{x:.2f}")
+    #         self.ui.scPositionY.setText(f"{y:.2f}")
+    #         self.ui.scOrientation.setText(f"{marker['orientation']:.4f} rad")
             
-            self.ui.scYawEnable.blockSignals(True)
-            self.ui.scYawEnable.setChecked(marker['yaw_enable'])
-            self.ui.scYawEnable.blockSignals(False)
+    #         self.ui.scYawEnable.blockSignals(True)
+    #         self.ui.scYawEnable.setChecked(marker['yaw_enable'])
+    #         self.ui.scYawEnable.blockSignals(False)
             
-            self.ui.scLanding.blockSignals(True)
-            self.ui.scLanding.setChecked(marker['landing'])
-            self.ui.scLanding.blockSignals(False)
+    #         self.ui.scLanding.blockSignals(True)
+    #         self.ui.scLanding.setChecked(marker['landing'])
+    #         self.ui.scLanding.blockSignals(False)
             
-            self.ui.scEdit.setEnabled(True)
-            self.ui.scSendGoto.setEnabled(True)
-            self.ui.scClearMarker.setEnabled(True)
+    #         self.ui.scEdit.setEnabled(True)
+    #         self.ui.scSendGoto.setEnabled(True)
+    #         self.ui.scClearMarker.setEnabled(True)
             
-            self.current_marker = marker
-        else:
-            self._clear_marker_display()
+    #         self.current_marker = marker
+    #     else:
+    #         self._clear_marker_display()
     
-    def _clear_marker_display(self):
-        """Clear marker display"""
-        self.ui.scPositionX.setText("0.00")
-        self.ui.scPositionY.setText("0.00")
-        self.ui.scOrientation.setText("0.0000 rad")
-        self.ui.scYawEnable.setChecked(False)
-        self.ui.scLanding.setChecked(False)
-        self.ui.scEdit.setEnabled(False)
-        self.ui.scSendGoto.setEnabled(False)
-        self.ui.scClearMarker.setEnabled(False)
-        self.current_marker = None
+    # def _clear_marker_display(self):
+    #     """Clear marker display"""
+    #     self.ui.scPositionX.setText("0.00")
+    #     self.ui.scPositionY.setText("0.00")
+    #     self.ui.scOrientation.setText("0.0000 rad")
+    #     self.ui.scYawEnable.setChecked(False)
+    #     self.ui.scLanding.setChecked(False)
+    #     self.ui.scEdit.setEnabled(False)
+    #     self.ui.scSendGoto.setEnabled(False)
+    #     self.ui.scClearMarker.setEnabled(False)
+    #     self.current_marker = None
     
     # ========================================
     # MARKER ACTIONS
     # ========================================
     
-    def edit_marker_orientation(self):
-        """Edit marker orientation"""
-        if self.current_marker and self.current_view_mode == "pointcloud":
-            dialog = JoystickDialog(self.current_marker['orientation'], self)
-            if dialog.exec_() == dialog.Accepted:
-                self.main_point_cloud.update_marker(orientation=dialog.orientation)
-                self.log_debug(f"Marker orientation: {dialog.orientation:.3f} rad")
+    # def edit_marker_orientation(self):
+    #     """Edit marker orientation"""
+    #     if self.current_marker and self.current_view_mode == "pointcloud":
+    #         dialog = JoystickDialog(self.current_marker['orientation'], self)
+    #         if dialog.exec_() == dialog.Accepted:
+    #             self.main_point_cloud.update_marker(orientation=dialog.orientation)
+    #             self.log_debug(f"Marker orientation: {dialog.orientation:.3f} rad")
     
-    def clear_marker(self):
-        """Clear current marker"""
-        if self.current_view_mode == "pointcloud":
-            self.main_point_cloud.clear_marker()
-            self.log_debug("Marker cleared")
+    # def clear_marker(self):
+    #     """Clear current marker"""
+    #     if self.current_view_mode == "pointcloud":
+    #         self.main_point_cloud.clear_marker()
+    #         self.log_debug("Marker cleared")
     
-    def send_goto_command(self):
-        """Send goto command"""
-        if self.current_marker and self.current_view_mode == "pointcloud":
-            x, y = self.current_marker['position']
-            ori = self.current_marker['orientation']
-            yaw = 1 if self.current_marker['yaw_enable'] else 0
-            land = 1 if self.current_marker['landing'] else 0
+    # def send_goto_command(self):
+    #     """Send goto command"""
+    #     if self.current_marker and self.current_view_mode == "pointcloud":
+    #         x, y = self.current_marker['position']
+    #         ori = self.current_marker['orientation']
+    #         yaw = 1 if self.current_marker['yaw_enable'] else 0
+    #         land = 1 if self.current_marker['landing'] else 0
             
-            cmd = f"goto [{x:.2f}, {y:.2f}, {ori:.3f}, {yaw}, {land}]"
-            self.send_websocket_command(cmd)
-            self.log_debug(f"Sent: {cmd}")
+    #         cmd = f"goto [{x:.2f}, {y:.2f}, {ori:.3f}, {yaw}, {land}]"
+    #         self.send_websocket_command(cmd)
+    #         self.log_debug(f"Sent: {cmd}")
     
-    def update_marker_yaw(self, state):
-        """Update marker yaw enable"""
-        if self.current_marker and self.current_view_mode == "pointcloud":
-            yaw_enable = state == Qt.Checked
-            self.main_point_cloud.update_marker(yaw_enable=yaw_enable)
+    # def update_marker_yaw(self, state):
+    #     """Update marker yaw enable"""
+    #     if self.current_marker and self.current_view_mode == "pointcloud":
+    #         yaw_enable = state == Qt.Checked
+    #         self.main_point_cloud.update_marker(yaw_enable=yaw_enable)
     
-    def update_marker_landing(self, state):
-        """Update marker landing"""
-        if self.current_marker and self.current_view_mode == "pointcloud":
-            landing = state == Qt.Checked
-            self.main_point_cloud.update_marker(landing=landing)
+    # def update_marker_landing(self, state):
+    #     """Update marker landing"""
+    #     if self.current_marker and self.current_view_mode == "pointcloud":
+    #         landing = state == Qt.Checked
+    #         self.main_point_cloud.update_marker(landing=landing)
     
     # ========================================
     # WAYPOINT ACTIONS
     # ========================================
     
-    def edit_waypoint_orientation(self, index):
-        """Edit waypoint orientation"""
-        if self.current_view_mode != "pointcloud":
-            return
+    # def edit_waypoint_orientation(self, index):
+    #     """Edit waypoint orientation"""
+    #     if self.current_view_mode != "pointcloud":
+    #         return
         
-        waypoints = self.main_point_cloud.get_waypoints()
-        if 0 <= index < len(waypoints):
-            dialog = JoystickDialog(waypoints[index]['orientation'], self)
-            if dialog.exec_() == dialog.Accepted:
-                self.main_point_cloud.update_waypoint(index, orientation=dialog.orientation)
-                self.log_debug(f"Waypoint {index+1} orientation: {dialog.orientation:.3f} rad")
+    #     waypoints = self.main_point_cloud.get_waypoints()
+    #     if 0 <= index < len(waypoints):
+    #         dialog = JoystickDialog(waypoints[index]['orientation'], self)
+    #         if dialog.exec_() == dialog.Accepted:
+    #             self.main_point_cloud.update_waypoint(index, orientation=dialog.orientation)
+    #             self.log_debug(f"Waypoint {index+1} orientation: {dialog.orientation:.3f} rad")
     
-    def update_waypoint_yaw(self, index, state):
-        """Update waypoint yaw enable"""
-        if self.current_view_mode == "pointcloud":
-            self.main_point_cloud.update_waypoint(index, yaw_enable=(state == Qt.Checked))
+    # def update_waypoint_yaw(self, index, state):
+    #     """Update waypoint yaw enable"""
+    #     if self.current_view_mode == "pointcloud":
+    #         self.main_point_cloud.update_waypoint(index, yaw_enable=(state == Qt.Checked))
     
-    def update_waypoint_landing(self, index, state):
-        """Update waypoint landing"""
-        if self.current_view_mode == "pointcloud":
-            self.main_point_cloud.update_waypoint(index, landing=(state == Qt.Checked))
+    # def update_waypoint_landing(self, index, state):
+    #     """Update waypoint landing"""
+    #     if self.current_view_mode == "pointcloud":
+    #         self.main_point_cloud.update_waypoint(index, landing=(state == Qt.Checked))
     
-    def add_waypoint(self, index):
-        """Add waypoint"""
-        if self.current_view_mode == "pointcloud":
-            self.main_point_cloud.update_waypoint(index, added=True)
-            waypoints = self.main_point_cloud.get_waypoints()
-            pos = waypoints[index]['position']
-            self.log_debug(f"Waypoint {index+1} added: ({pos[0]:.2f}, {pos[1]:.2f})")
-            self.send_waypoints_to_server()
+    # def add_waypoint(self, index):
+    #     """Add waypoint"""
+    #     if self.current_view_mode == "pointcloud":
+    #         self.main_point_cloud.update_waypoint(index, added=True)
+    #         waypoints = self.main_point_cloud.get_waypoints()
+    #         pos = waypoints[index]['position']
+    #         self.log_debug(f"Waypoint {index+1} added: ({pos[0]:.2f}, {pos[1]:.2f})")
+    #         self.send_waypoints_to_server()
     
-    def delete_waypoint(self, index):
-        """Delete waypoint"""
-        if self.current_view_mode == "pointcloud":
-            self.main_point_cloud.delete_waypoint(index)
-            self.log_debug(f"Waypoint {index+1} deleted")
-            self.send_waypoints_to_server()
+    # def delete_waypoint(self, index):
+    #     """Delete waypoint"""
+    #     if self.current_view_mode == "pointcloud":
+    #         self.main_point_cloud.delete_waypoint(index)
+    #         self.log_debug(f"Waypoint {index+1} deleted")
+    #         self.send_waypoints_to_server()
     
-    def send_multiple_commands(self):
-        """Send multiple waypoints and start mission"""
-        if self.current_view_mode != "pointcloud":
-            self.log_debug("Cannot send waypoints: not in point cloud view")
-            return
+    # def send_multiple_commands(self):
+    #     """Send multiple waypoints and start mission"""
+    #     if self.current_view_mode != "pointcloud":
+    #         self.log_debug("Cannot send waypoints: not in point cloud view")
+    #         return
         
-        try:
-            waypoints = self.main_point_cloud.get_waypoints()
-            added = [wp for wp in waypoints if wp.get('added', False)]
+    #     try:
+    #         waypoints = self.main_point_cloud.get_waypoints()
+    #         added = [wp for wp in waypoints if wp.get('added', False)]
             
-            if not added:
-                self.log_debug("No waypoints to send")
-                return
+    #         if not added:
+    #             self.log_debug("No waypoints to send")
+    #             return
             
-            # Format waypoints
-            wp_strings = []
-            for wp in added:
-                x, y = wp['position']
-                wp_str = f"[{x:.2f},{y:.2f},{wp['orientation']:.3f}," \
-                         f"{int(wp['yaw_enable'])},{int(wp['landing'])}]"
-                wp_strings.append(wp_str)
+    #         # Format waypoints
+    #         wp_strings = []
+    #         for wp in added:
+    #             x, y = wp['position']
+    #             wp_str = f"[{x:.2f},{y:.2f},{wp['orientation']:.3f}," \
+    #                      f"{int(wp['yaw_enable'])},{int(wp['landing'])}]"
+    #             wp_strings.append(wp_str)
             
-            # Send coordinates
-            cmd = f"coordinates [{','.join(wp_strings)}]"
-            if self.send_websocket_command(cmd):
-                self.log_debug(f"Sent {len(wp_strings)} waypoints")
-                time.sleep(0.1)
+    #         # Send coordinates
+    #         cmd = f"coordinates [{','.join(wp_strings)}]"
+    #         if self.send_websocket_command(cmd):
+    #             self.log_debug(f"Sent {len(wp_strings)} waypoints")
+    #             time.sleep(0.1)
                 
-                # Start mission
-                if self.send_websocket_command("start"):
-                    self.log_debug("Mission started")
-                else:
-                    self.log_debug("Failed to start mission")
-            else:
-                self.log_debug("Failed to send waypoints")
+    #             # Start mission
+    #             if self.send_websocket_command("start"):
+    #                 self.log_debug("Mission started")
+    #             else:
+    #                 self.log_debug("Failed to start mission")
+    #         else:
+    #             self.log_debug("Failed to send waypoints")
         
-        except Exception as e:
-            self.log_debug(f"Error: {e}")
+    #     except Exception as e:
+    #         self.log_debug(f"Error: {e}")
     
-    def send_waypoints_to_server(self):
-        """Send waypoints to server"""
-        try:
-            waypoints = self.main_point_cloud.get_waypoints()
-            added = [wp for wp in waypoints if wp.get('added', False)]
+    # def send_waypoints_to_server(self):
+    #     """Send waypoints to server"""
+    #     try:
+    #         waypoints = self.main_point_cloud.get_waypoints()
+    #         added = [wp for wp in waypoints if wp.get('added', False)]
             
-            if not added:
-                return False
+    #         if not added:
+    #             return False
             
-            wp_strings = []
-            for wp in added:
-                x, y = wp['position']
-                wp_str = f"[{x:.2f},{y:.2f},{wp['orientation']:.3f}," \
-                         f"{int(wp['yaw_enable'])},{int(wp['landing'])}]"
-                wp_strings.append(wp_str)
+    #         wp_strings = []
+    #         for wp in added:
+    #             x, y = wp['position']
+    #             wp_str = f"[{x:.2f},{y:.2f},{wp['orientation']:.3f}," \
+    #                      f"{int(wp['yaw_enable'])},{int(wp['landing'])}]"
+    #             wp_strings.append(wp_str)
             
-            cmd = f"coordinates [{','.join(wp_strings)}]"
-            return self.send_websocket_command(cmd)
+    #         cmd = f"coordinates [{','.join(wp_strings)}]"
+    #         return self.send_websocket_command(cmd)
         
-        except Exception as e:
-            self.log_debug(f"Error sending waypoints: {e}")
-            return False
+    #     except Exception as e:
+    #         self.log_debug(f"Error sending waypoints: {e}")
+    #         return False
     
-    def save_current_frame(self):
-        """Save current point cloud frame"""
-        if self.current_view_mode != "pointcloud":
-            self.log_debug("Cannot save: not in point cloud view")
-            return
+    # def save_current_frame(self):
+    #     """Save current point cloud frame"""
+    #     if self.current_view_mode != "pointcloud":
+    #         self.log_debug("Cannot save: not in point cloud view")
+    #         return
         
-        raw_points = self.main_point_cloud.raw_points
-        if len(raw_points) == 0:
-            self.log_debug("No frame to save")
-            return
+    #     raw_points = self.main_point_cloud.raw_points
+    #     if len(raw_points) == 0:
+    #         self.log_debug("No frame to save")
+    #         return
         
-        try:
-            import open3d as o3d
-            timestamp = int(time.time())
-            filename = f"pointcloud_raw_{timestamp}.ply"
+    #     try:
+    #         import open3d as o3d
+    #         timestamp = int(time.time())
+    #         filename = f"pointcloud_raw_{timestamp}.ply"
             
-            pcd = o3d.geometry.PointCloud()
-            pcd.points = o3d.utility.Vector3dVector(raw_points)
+    #         pcd = o3d.geometry.PointCloud()
+    #         pcd.points = o3d.utility.Vector3dVector(raw_points)
             
-            raw_heights = raw_points[:, 2]
-            raw_colors = self.main_point_cloud.generate_colors(raw_heights)
-            if len(raw_colors) > 0:
-                pcd.colors = o3d.utility.Vector3dVector(raw_colors)
+    #         raw_heights = raw_points[:, 2]
+    #         raw_colors = self.main_point_cloud.generate_colors(raw_heights)
+    #         if len(raw_colors) > 0:
+    #             pcd.colors = o3d.utility.Vector3dVector(raw_colors)
             
-            o3d.io.write_point_cloud(filename, pcd)
-            self.log_debug(f"Saved: {filename} ({len(raw_points)} points)")
+    #         o3d.io.write_point_cloud(filename, pcd)
+    #         self.log_debug(f"Saved: {filename} ({len(raw_points)} points)")
         
-        except Exception as e:
-            self.log_debug(f"Save error: {e}")
+    #     except Exception as e:
+    #         self.log_debug(f"Save error: {e}")
     
     # ========================================
     # UTILITY METHODS
     # ========================================
     
-    def on_orientation_dial_changed(self, value):
-        """Handle orientation dial change"""
-        import math
-        orientation = (value / 50.0 - 1.0) * math.pi
-        self.ui.mcOrientation.setText(f"{orientation:.4f} rad")
+    # def on_orientation_dial_changed(self, value):
+    #     """Handle orientation dial change"""
+    #     import math
+    #     orientation = (value / 50.0 - 1.0) * math.pi
+    #     self.ui.mcOrientation.setText(f"{orientation:.4f} rad")
     
-    def update_altitude_display(self, value=None):
-        """Update altitude slider from DroneHeight label"""
-        try:
-            height_text = self.ui.DroneHeight.text().strip()
-            height_text = height_text.replace(" meter", "").replace(" m", "").strip()
-            altitude = float(height_text)
-            slider_value = int(round(altitude * 100))
-            self.ui.DroneAltitude.setValue(slider_value)
-        except ValueError:
-            pass
+    # def update_altitude_display(self, value=None):
+    #     """Update altitude slider from DroneHeight label"""
+    #     try:
+    #         height_text = self.ui.DroneHeight.text().strip()
+    #         height_text = height_text.replace(" meter", "").replace(" m", "").strip()
+    #         altitude = float(height_text)
+    #         slider_value = int(round(altitude * 100))
+    #         self.ui.DroneAltitude.setValue(slider_value)
+    #     except ValueError:
+    #         pass
     
     def update_fps_display(self):
         """Update FPS display"""
@@ -1122,12 +1125,12 @@ class DroneControlMainWindow(QMainWindow):
         timestamp = time.strftime("%H:%M:%S")
         formatted = f"[{timestamp}] {message}"
         
-        self.ui.tbDebugging.append(formatted)
+        self.ui.txtConsole.append(formatted)
         
         # Keep only last 100 lines
-        doc = self.ui.tbDebugging.document()
+        doc = self.ui.txtConsole.document()
         if doc.blockCount() > 100:
-            cursor = self.ui.tbDebugging.textCursor()
+            cursor = self.ui.txtConsole.textCursor()
             cursor.movePosition(cursor.Start)
             cursor.select(cursor.LineUnderCursor)
             cursor.removeSelectedText()
@@ -1162,33 +1165,33 @@ class DroneControlMainWindow(QMainWindow):
             print(f"Video stop error: {e}")
         
         # Stop TCP server
-        if hasattr(self, 'tcp_receiver'):
-            self.tcp_receiver.stop_server()
-        if hasattr(self, 'tcp_thread') and self.tcp_thread:
-            self.tcp_thread.quit()
-            self.tcp_thread.wait()
+        # if hasattr(self, 'tcp_receiver'):
+        #     self.tcp_receiver.stop_server()
+        # if hasattr(self, 'tcp_thread') and self.tcp_thread:
+        #     self.tcp_thread.quit()
+        #     self.tcp_thread.wait()
         
         # Stop WebSocket client
-        if hasattr(self, 'websocket_client'):
-            self.websocket_client.stop_client()
-        if hasattr(self, 'websocket_thread') and self.websocket_thread:
-            self.websocket_thread.quit()
-            self.websocket_thread.wait()
+        # if hasattr(self, 'websocket_client'):
+        #     self.websocket_client.stop_client()
+        # if hasattr(self, 'websocket_thread') and self.websocket_thread:
+        #     self.websocket_thread.quit()
+        #     self.websocket_thread.wait()
         
         # Stop drone parser
-        if hasattr(self, 'drone_parser') and self.drone_parser:
-            try:
-                self.drone_parser.stop()
-            except Exception as e:
-                print(f"Drone parser stop error: {e}")
+        # if hasattr(self, 'drone_parser') and self.drone_parser:
+        #     try:
+        #         self.drone_parser.stop()
+        #     except Exception as e:
+        #         print(f"Drone parser stop error: {e}")
         
-        # Save waypoints
-        if hasattr(self, 'main_point_cloud'):
-            try:
-                self.main_point_cloud.save_waypoints_to_json()
-                print("Waypoints saved")
-            except Exception as e:
-                print(f"Waypoint save error: {e}")
+        # # Save waypoints
+        # if hasattr(self, 'main_point_cloud'):
+        #     try:
+        #         self.main_point_cloud.save_waypoints_to_json()
+        #         print("Waypoints saved")
+        #     except Exception as e:
+        #         print(f"Waypoint save error: {e}")
         
         print("System shutdown complete\n")
         event.accept()
