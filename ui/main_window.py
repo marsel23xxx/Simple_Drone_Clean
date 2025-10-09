@@ -147,7 +147,8 @@ class DroneControlMainWindow(QMainWindow):
         print("   R - Rust Detection (Full with Position)")
         print("   T - Landolt Detection (3D Analytics)")
         print("   Y - Motion Detection")
-        print("   J/K/L - Save Camera 0/1/2")
+        print("   J/K/L - Save Camera 0/1/2 (if frozen)")
+        print("   SHIFT+J/K/L - Manual Save (without frozen)")  # NEW
         print("   P - Discard all & STANDBY\n")
     
     def setup_communication(self):
@@ -547,6 +548,44 @@ class DroneControlMainWindow(QMainWindow):
             self.current_ai_mode = mode
             self.log_debug(f"AI Mode: {mode.upper()}")
     
+    # def keyPressEvent(self, event):
+    #     """Handle keyboard shortcuts for AI control"""
+    #     if not self.ai_controller:
+    #         super().keyPressEvent(event)
+    #         return
+        
+    #     key = event.key()
+        
+    #     # AI mode switches
+    #     mode_keys = {
+    #         Qt.Key_Q: 'qr',
+    #         Qt.Key_W: 'hazmat',
+    #         Qt.Key_E: 'crack',
+    #         Qt.Key_R: 'rust',
+    #         Qt.Key_T: 'landolt',
+    #         Qt.Key_Y: 'motion'
+    #     }
+        
+    #     if key in mode_keys:
+    #         self.switch_ai_mode(mode_keys[key])
+    #         return
+        
+    #     # Save commands
+    #     if key == Qt.Key_J:
+    #         self._save_camera(0)
+    #     elif key == Qt.Key_K:
+    #         self._save_camera(1)
+    #     elif key == Qt.Key_L:
+    #         self._save_camera(2)
+    #     elif key == Qt.Key_P:
+    #         # Discard all and return to standby
+    #         for worker in self.ai_controller.workers:
+    #             worker.unfreeze()
+    #         self.switch_ai_mode('standby')
+    #         self.log_debug("All cameras unfrozen - STANDBY")
+    #     else:
+    #         super().keyPressEvent(event)
+            
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts for AI control"""
         if not self.ai_controller:
@@ -554,6 +593,7 @@ class DroneControlMainWindow(QMainWindow):
             return
         
         key = event.key()
+        modifiers = event.modifiers()  # ✅ Deteksi Shift di awal
         
         # AI mode switches
         mode_keys = {
@@ -569,13 +609,15 @@ class DroneControlMainWindow(QMainWindow):
             self.switch_ai_mode(mode_keys[key])
             return
         
-        # Save commands
+        # ✅ Save commands - HANYA SATU BLOK
+        force_save = bool(modifiers & Qt.ShiftModifier)  # Shift pressed = force save
+        
         if key == Qt.Key_J:
-            self._save_camera(0)
+            self._save_camera(0, force_save)
         elif key == Qt.Key_K:
-            self._save_camera(1)
+            self._save_camera(1, force_save)
         elif key == Qt.Key_L:
-            self._save_camera(2)
+            self._save_camera(2, force_save)
         elif key == Qt.Key_P:
             # Discard all and return to standby
             for worker in self.ai_controller.workers:
@@ -585,17 +627,31 @@ class DroneControlMainWindow(QMainWindow):
         else:
             super().keyPressEvent(event)
     
-    def _save_camera(self, cam_index):
-        """Helper to save camera detection"""
+    def _save_camera(self, cam_index, force_save=False):
+        """
+        Helper to save camera detection
+        Args:
+            cam_index: Camera index (0, 1, 2)
+            force_save: If True, save even without frozen (manual save)
+        """
         if cam_index >= len(self.ai_controller.workers):
             return
         
         worker = self.ai_controller.workers[cam_index]
+        
         if worker.is_frozen:
-            worker.save_current_detection(self.current_ai_mode)
-            self.log_debug(f"Camera {cam_index} saved")
+            # Normal frozen save
+            worker.save_current_detection(self.current_ai_mode, force_save=False)
+            self.log_debug(f"✅ Camera {cam_index} saved (FROZEN)")
+        elif force_save:
+            # Force manual save without frozen
+            success = worker.save_current_detection(self.current_ai_mode, force_save=True)
+            if success:
+                self.log_debug(f"✅ Camera {cam_index} saved (MANUAL - no detection)")
+            else:
+                self.log_debug(f"❌ Camera {cam_index} - No frame available for manual save")
         else:
-            self.log_debug(f"Camera {cam_index} not frozen - cannot save")
+            self.log_debug(f"❌ Camera {cam_index} not frozen - Press SHIFT+J/K/L for manual save")
     
     # ========================================
     # WEBSOCKET COMMANDS
