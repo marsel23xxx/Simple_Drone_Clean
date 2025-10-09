@@ -9,3 +9,23 @@ timestamp,camera_id,detection_type,color,position,data
 20251008_004040,cam0,hazmat,red,"(None, None, None)",Unknown Hazmat
 20251008_004249,cam0,hazmat,red,"(None, None, None)",Unknown Hazmat
 20251008_004848,cam0,hazmat,red,"(-0.18, -0.06, -0.06)",Unknown Hazmat
+20251008_211848,cam0,qr,blue,"(0.13, -0.00, -0.05)",QRCode 1: http://en.m.wikipedia.org
+20251008_211949,cam0,hazmat,red,"(0.13, -0.00, -0.05)",Hazmat 1: Class 8 - Corrosive
+20251008_212206,cam0,crack,orange,"(0.13, -0.00, -0.05)",Crack 1: 0.1267m (Medium)
+20251008_212735,cam0,crack,orange,"(0.13, -0.00, -0.05)",Crack 2: 0.1274m (Medium)
+20251008_213502,cam0,rust,brown,"(0.13, -0.00, -0.05)",Rust 1: Fair (16.7%)
+20251008_213956,cam0,landolt,yellow,"(0.13, -0.00, -0.05)",Landolt 1: No ID detected
+20251008_215833,cam0,crack,orange,"(0.13, -0.01, -0.05)",Crack 1: 0.1289m (Medium)
+20251008_220923,cam0,crack,orange,"(0.13, -0.01, -0.05)",Crack 1: 0.1259m (Medium)
+20251008_221606,cam0,crack,orange,"(0.13, -0.01, -0.05)",Crack 1: 0.1283m (Medium)
+20251008_222405,cam0,crack,orange,"(0.13, -0.01, -0.05)",Crack 1: 0.1278m (Medium)
+20251008_222630,cam0,crack,orange,"(0.13, -0.01, -0.05)",Crack 1: 0.1267m (Medium)
+20251008_223318,cam0,crack,orange,"(0.13, -0.01, -0.05)",Crack 1: 0.1374m (Medium)
+20251008_223500,cam0,crack,orange,"(0.13, -0.01, -0.05)",Crack 1: 0.1265m (Medium)
+20251008_223856,cam0,crack,orange,"(0.13, -0.00, -0.05)",Crack 1: 0.1356m (Medium)
+20251008_225158,cam0,crack,orange,"(0.13, -0.01, -0.05)",Crack 1: 0.2711m (Wide/Severe)
+20251008_225525,cam0,crack,orange,"(0.13, -0.01, -0.05)",Crack 1: 0.2539m (Wide/Severe)
+20251008_225834,cam0,crack,orange,"(0.13, -0.01, -0.05)",Crack 1: 0.2551m (Wide/Severe)
+20251008_230232,cam0,crack,orange,"(0.13, -0.01, -0.05)",Crack 1: 0.2547m (Wide/Severe)
+20251008_230646,cam0,crack,orange,"(0.13, -0.01, -0.05)",Crack 1: 0.2516m (Wide/Severe)
+20251008_232350,cam0,rust,brown,"(0.13, -0.01, -0.05)",Rust 1: Fair (19.5%)

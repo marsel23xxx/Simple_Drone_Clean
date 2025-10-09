@@ -1281,11 +1281,11 @@ class CameraWorker:
         
         # CRACK DETECTION PARAMETERS
         self.WARP_SIZE = 300
-        self.M_PER_PIXEL = 0.10 / self.WARP_SIZE
+        self.M_PER_PIXEL = 0.20 / self.WARP_SIZE
         self.CAMERA_HEIGHT = 1.500
         self.CAMERA_FOV_H = 60.0
         self.CAMERA_FOV_V = 45.0
-        self.DETECTED_SQUARE_SIZE = 0.200
+        self.DETECTED_SQUARE_SIZE = 0.20
         
         # RUST DETECTION PARAMETERS
         self.RUST_WARP_SIZE = 300
@@ -2257,6 +2257,7 @@ class CameraWorker:
                 
                 clean_warped = warped.copy()
                 cv2.rectangle(clean_warped, (0, 0), (self.WARP_SIZE-1, self.WARP_SIZE-1), (0, 0, 0), 1)
+
                 
                 display = self._create_crack_display(overlayed, clean_warped)
                 
@@ -2859,7 +2860,7 @@ class CameraWorker:
         
         return self.last_processed_frame
     
-    def save_current_detection(self, mode: str):
+    def save_current_detection(self, mode: str, force_save=False):
         if self.is_frozen and self.frozen_frame is not None:
             frame_to_save = self.frozen_frame
             print(f"[CAM {self.camera_id}] Saving FROZEN frame")
@@ -2971,6 +2972,8 @@ class CameraWorker:
             os.makedirs(capture_folder, exist_ok=True)
             image_path = f"{capture_folder}/crack_original_{timestamp}.jpg"
             cv2.imwrite(image_path, self.current_crack_analysis['original_frame'])
+            image_path = f"{capture_folder}/crack_analysis_{timestamp}.jpg"
+            cv2.imwrite(image_path, self.current_crack_analysis['display'])
             
             # Increment counter
             self.crack_counter += 1
@@ -2985,10 +2988,19 @@ class CameraWorker:
                 data_field = f"Crack {self.crack_counter}: Unknown length"
             
             print(f"[CAM {self.camera_id}] Saved Crack: {capture_folder}")
+            
+            # Save crack analytics text
+            if self.current_crack_analysis and 'analytics_text' in self.current_crack_analysis:
+                txt_path = os.path.join(capture_folder, f"crack_analytics_{timestamp}.txt")
+                with open(txt_path, 'w', encoding='utf-8') as f:
+                    f.write(self.current_crack_analysis['analytics_text'])
+                print(f"[CAM {self.camera_id}] ✅ Saved Crack Analytics: {txt_path}")
 
-        elif mode == 'rust':
+        elif mode == 'rust' and self.current_rust_analysis:
             filename = f"{base_path}/rust/images/rust_cam{self.camera_id}_{timestamp}.jpg"
             cv2.imwrite(filename, self.frozen_frame)
+            filename = f"{base_path}/rust/images/rust_analysis_cam{self.camera_id}_{timestamp}.jpg"
+            cv2.imwrite(filename, self.current_rust_analysis['display'])
             
             # Increment counter
             self.rust_counter += 1
@@ -3003,6 +3015,15 @@ class CameraWorker:
                 data_field = f"Rust {self.rust_counter}: Unknown degree"
             
             print(f"[CAM {self.camera_id}] Saved Rust: {filename}")
+            
+            # Save rust analytics text
+            if self.current_rust_analysis and 'analytics_text' in self.current_rust_analysis:
+                txt_path = f"{base_path}/rust/analytics/rust_cam{self.camera_id}_{timestamp}.txt"
+                os.makedirs(os.path.dirname(txt_path), exist_ok=True)
+                with open(txt_path, 'w', encoding='utf-8') as f:
+                    f.write(self.current_rust_analysis['analytics_text'])
+                print(f"[CAM {self.camera_id}] ✅ Saved Rust Analytics: {txt_path}")
+
 
         elif mode == 'hazmat':
             filename = f"{base_path}/hazmat/images/hazmat_cam{self.camera_id}_{timestamp}.jpg"
@@ -3320,17 +3341,18 @@ class MultiCameraController:
         elif key == ord('y'):
             self.switch_mode(self.MODES['MOTION'])
         elif key == ord('j'):
-            if self.workers[0].is_frozen:
-                self.workers[0].save_current_detection(self.current_mode)
-            else:
-                print("[CAM 0] Not frozen - cannot save")
+            self.workers[0].save_current_detection(self.current_mode)
+            # if self.workers[0].is_frozen:
+            #     self.workers[0].save_current_detection(self.current_mode)
+            # else:
+            #      print("[CAM 0] Not frozen - cannot save")
         elif key == ord('k'):
-            if len(self.workers) > 1 and self.workers[1].is_frozen:
+            if (len(self.workers) > 1 and self.workers[1].is_frozen):
                 self.workers[1].save_current_detection(self.current_mode)
             else:
                 print("[CAM 1] Not frozen - cannot save")
         elif key == ord('l'):
-            if len(self.workers) > 2 and self.workers[2].is_frozen:
+            if (len(self.workers) > 2 and self.workers[2].is_frozen):
                 self.workers[2].save_current_detection(self.current_mode)
             else:
                 print("[CAM 2] Not frozen - cannot save")
