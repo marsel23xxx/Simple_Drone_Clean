@@ -1302,6 +1302,8 @@ class CameraWorker:
         self.rust_saved_objects = set()
         self.RUST_STABILIZATION_FRAMES = 5
         
+        self.last_processed_frame = None
+        
         # Hazard class mapping
         self.hazard_classes = {
             'explosive': 'Class 1 - Explosive',
@@ -1842,6 +1844,13 @@ class CameraWorker:
                     self._auto_save_detection(frame, result, self.frame_count)
         
         self.current_landolt_results = combined_results
+        # return combined_results
+    
+        if combined_results:  # Only store if there are results
+            annotated = self.annotate_landolt(frame, combined_results)
+            self.last_processed_frame = annotated
+        self.last_processed_frame = annotated
+        
         return combined_results
     
     def _draw_landolt_results(self, frame, results):
@@ -1932,6 +1941,12 @@ class CameraWorker:
     def process_qr(self, frame):
         detections = self.qr_detector_3d.process_qr_enhanced(frame)
         self.current_qr_detections = detections
+        
+        # ✅ TAMBAH INI
+        if detections:
+            annotated = self.annotate_qr(frame, detections)
+            self.last_processed_frame = annotated
+        
         return detections
     
     def annotate_qr(self, frame, detections):
@@ -1997,6 +2012,11 @@ class CameraWorker:
         """Process motion detection using full DotOnPlateTracker"""
         tracking_data = self.motion_tracker.process_frame(frame)
         self.current_motion_data = tracking_data
+        
+        if tracking_data:
+                annotated = self.annotate_motion(frame, tracking_data)
+                self.last_processed_frame = annotated
+                
         return tracking_data
     
     def annotate_motion(self, frame, tracking_data):
@@ -2151,6 +2171,9 @@ class CameraWorker:
                 self._save_hazmat_detection(annotated_frame, detections_to_save)
             
             self.current_hazmat_results = results
+            if results and results.boxes is not None:
+                annotated = self._annotate_hazmat_for_save(frame.copy(), results)
+                self.last_processed_frame = annotated
             return results
         except Exception as e:
             logger.error(f"[CAM {self.camera_id}] Hazmat error: {e}")
@@ -2557,6 +2580,7 @@ class CameraWorker:
                 'original_frame': frame.copy()
             }
             
+            self.last_processed_frame = display
             return self.current_rust_analysis
             
         except Exception as e:
@@ -2790,10 +2814,64 @@ class CameraWorker:
             
         except Exception as e:
             self.log_debug(f"Error updating position: {e}")
+            
+    def _get_latest_frame_for_mode(self, mode):
+        """Get latest frame based on current mode"""
+        
+        # For modes that need special processing, return processed frame
+        if mode == 'qr' and self.current_qr_detections:
+            # Return frame with QR annotations
+            return self._create_annotated_frame_for_save(mode)
+        
+        elif mode == 'landolt' and self.current_landolt_results:
+            # Return frame with Landolt annotations
+            return self._create_annotated_frame_for_save(mode)
+        
+        elif mode == 'hazmat' and self.current_hazmat_results:
+            # Return frame with Hazmat annotations
+            return self._create_annotated_frame_for_save(mode)
+        
+        elif mode == 'crack' and self.current_crack_analysis:
+            # Return crack display
+            return self.current_crack_analysis.get('display')
+        
+        elif mode == 'rust' and self.current_rust_analysis:
+            # Return rust display
+            return self.current_rust_analysis.get('display')
+        
+        elif mode == 'motion' and self.current_motion_data:
+            # Return motion annotated frame
+            return self._create_annotated_frame_for_save(mode)
+        
+        # If no detection, return None
+        return None
+    
+    def _create_annotated_frame_for_save(self, mode):
+        """Create annotated frame for manual save"""
+        # This should be implemented to create a proper annotated frame
+        # For now, return None if no proper frame exists
+        
+        # You'll need to store a reference to the last processed frame
+        # Add this to __init__: self.last_processed_frame = None
+        
+        if not hasattr(self, 'last_processed_frame') or self.last_processed_frame is None:
+            return None
+        
+        return self.last_processed_frame
     
     def save_current_detection(self, mode: str):
-        if not self.is_frozen or self.frozen_frame is None:
-            print(f"[CAM {self.camera_id}] Nothing to save - not frozen")
+        if self.is_frozen and self.frozen_frame is not None:
+            frame_to_save = self.frozen_frame
+            print(f"[CAM {self.camera_id}] Saving FROZEN frame")
+        elif force_save:
+            # Manual save without frozen - get latest frame
+            frame_to_save = self._get_latest_frame_for_mode(mode)
+            if frame_to_save is None:
+                print(f"[CAM {self.camera_id}] No frame available for manual save")
+                return False
+            print(f"[CAM {self.camera_id}] Saving LIVE frame (manual save)")
+        else:
+            print(f"[CAM {self.camera_id}] Nothing to save - not frozen and not force mode")
             return False
 
         import csv
